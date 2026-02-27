@@ -28,6 +28,30 @@ function makeMockPool(queryImpl: (text: string, values?: unknown[]) => Promise<Q
   } as unknown as Pool;
 }
 
+// A minimal interlocutor row returned by fetchInterlocutorById for id=10.
+const interlocutorRow10 = {
+  id: 10,
+  display_name: "Alice",
+  agent_id: 3,
+  owner: false,
+  enabled: true,
+  created_at: new Date("2024-01-01"),
+  service: null,
+  identifier: null,
+};
+
+// A minimal interlocutor row returned by fetchInterlocutorById for id=5.
+const interlocutorRow5 = {
+  id: 5,
+  display_name: "Bob",
+  agent_id: null,
+  owner: false,
+  enabled: true,
+  created_at: new Date("2024-01-01"),
+  service: null,
+  identifier: null,
+};
+
 describe("manage_interlocutors — help", () => {
   it("returns documentation text", async () => {
     const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
@@ -43,6 +67,15 @@ describe("manage_interlocutors — help", () => {
     expect(text).toContain("agent_id");
     expect(text).toContain("subagent");
   });
+
+  it("documents the enabled parameter for create", async () => {
+    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
+    const tool = createManageInterlocutorsTool(pool);
+    const result = await tool.execute("call-1", { action: "help" });
+    const text = makeText(result);
+    // The create section should mention enabled as an optional parameter.
+    expect(text).toContain("enabled");
+  });
 });
 
 describe("manage_interlocutors — create", () => {
@@ -53,18 +86,26 @@ describe("manage_interlocutors — create", () => {
     expect(makeText(result)).toContain("display_name is required");
   });
 
-  it("creates an interlocutor with agent_id and returns the new ID", async () => {
+  it("creates an interlocutor with agent_id and returns the full record", async () => {
     let clientCallCount = 0;
-    const pool = makeMockPool(() => {
+    const pool = makeMockPool((text: string) => {
       clientCallCount++;
+      // Second client call is the INSERT returning the new ID.
       if (clientCallCount === 2) {
         return Promise.resolve({ rows: [{ id: 10 }], rowCount: 1 } as unknown as QueryResult);
+      }
+      // The pool.query call for fetchInterlocutorById (SELECT with WHERE i.id = $1).
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({ rows: [interlocutorRow10], rowCount: 1 } as unknown as QueryResult);
       }
       return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
     });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "create", display_name: "Alice", agent_id: 3 });
-    expect(makeText(result)).toBe("Interlocutor 10 created.");
+    const text = makeText(result);
+    // The result should be TOON-encoded and contain the interlocutor's display_name.
+    expect(text).toContain("Alice");
+    expect(result.details).toMatchObject({ id: 10, display_name: "Alice" });
   });
 
   it("returns an error when only service is provided without identifier", async () => {
@@ -81,26 +122,67 @@ describe("manage_interlocutors — create", () => {
     expect(makeText(result)).toContain("service and identifier must both be provided or both absent");
   });
 
-  it("creates an interlocutor without identity and returns the new ID", async () => {
+  it("creates an interlocutor without identity and returns the full record", async () => {
     // The transaction runs on the client: BEGIN, INSERT interlocutor, COMMIT.
     let clientCallCount = 0;
-    const pool = makeMockPool(() => {
+    const pool = makeMockPool((text: string) => {
       clientCallCount++;
       // Second call is the INSERT returning the new ID.
       if (clientCallCount === 2) {
         return Promise.resolve({ rows: [{ id: 42 }], rowCount: 1 } as unknown as QueryResult);
       }
+      // The pool.query call for fetchInterlocutorById.
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ id: 42, display_name: "Alice", agent_id: null, owner: false, enabled: true, created_at: new Date("2024-01-01"), service: null, identifier: null }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
       return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
     });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "create", display_name: "Alice", instructions: "Be polite." });
-    expect(makeText(result)).toBe("Interlocutor 42 created.");
+    const text = makeText(result);
+    expect(text).toContain("Alice");
+    expect(result.details).toMatchObject({ id: 42, display_name: "Alice" });
+  });
+
+  it("creates an interlocutor with enabled: false and the record reflects disabled state", async () => {
+    let clientCallCount = 0;
+    const pool = makeMockPool((text: string) => {
+      clientCallCount++;
+      // Second call is the INSERT returning the new ID.
+      if (clientCallCount === 2) {
+        return Promise.resolve({ rows: [{ id: 20 }], rowCount: 1 } as unknown as QueryResult);
+      }
+      // The pool.query call for fetchInterlocutorById — returns enabled: false.
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ id: 20, display_name: "Charlie", agent_id: null, owner: false, enabled: false, created_at: new Date("2024-01-01"), service: null, identifier: null }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+    const tool = createManageInterlocutorsTool(pool);
+    const result = await tool.execute("call-1", { action: "create", display_name: "Charlie", enabled: false });
+    // Verify the INSERT included the enabled column.
+    const poolMock = pool as unknown as { connect: ReturnType<typeof vi.fn> };
+    const clientMock = await poolMock.connect() as unknown as { query: ReturnType<typeof vi.fn> };
+    const insertCall = clientMock.query.mock.calls.find(
+      (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("INSERT INTO interlocutors"),
+    );
+    expect(insertCall).toBeDefined();
+    expect((insertCall as unknown[])[0]).toContain("enabled");
+    expect((insertCall as unknown[])[1]).toContain(false);
+    // The returned record should show enabled: false.
+    expect(result.details).toMatchObject({ id: 20, enabled: false });
   });
 
   it("creates an interlocutor with identity when both service and identifier are provided", async () => {
     // The transaction runs on the client: BEGIN, INSERT interlocutor, INSERT identity, COMMIT.
     let clientCallCount = 0;
-    const pool = makeMockPool(() => {
+    const pool = makeMockPool((text: string) => {
       clientCallCount++;
       // Second call is the INSERT interlocutor returning the new ID.
       if (clientCallCount === 2) {
@@ -109,6 +191,13 @@ describe("manage_interlocutors — create", () => {
       // Third call is the INSERT identity — return rowCount: 1 to indicate success.
       if (clientCallCount === 3) {
         return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+      }
+      // The pool.query call for fetchInterlocutorById.
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ id: 7, display_name: "Bob", agent_id: null, owner: false, enabled: true, created_at: new Date("2024-01-01"), service: "signal", identifier: "+1234567890" }],
+          rowCount: 1,
+        } as unknown as QueryResult);
       }
       return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
     });
@@ -120,7 +209,9 @@ describe("manage_interlocutors — create", () => {
       service: "signal",
       identifier: "+1234567890",
     });
-    expect(makeText(result)).toBe("Interlocutor 7 created.");
+    const text = makeText(result);
+    expect(text).toContain("Bob");
+    expect(result.details).toMatchObject({ id: 7, display_name: "Bob" });
   });
 
   it("returns an error and rolls back when the identity conflicts during create", async () => {
@@ -175,39 +266,97 @@ describe("manage_interlocutors — update", () => {
     expect(makeText(result)).toContain("enabled");
   });
 
-  it("updates enabled to false and returns success", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult));
+  it("updates enabled to false and returns the full record", async () => {
+    const pool = makeMockPool((text: string) => {
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ ...interlocutorRow5, enabled: false }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "update", id: 5, enabled: false });
-    expect(makeText(result)).toBe("Interlocutor 5 updated.");
+    expect(result.details).toMatchObject({ id: 5, enabled: false });
+    expect(makeText(result)).toContain("Bob");
   });
 
-  it("updates enabled to true and returns success", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult));
+  it("updates enabled to true and returns the full record", async () => {
+    const pool = makeMockPool((text: string) => {
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ ...interlocutorRow5, enabled: true }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "update", id: 5, enabled: true });
-    expect(makeText(result)).toBe("Interlocutor 5 updated.");
+    expect(result.details).toMatchObject({ id: 5, enabled: true });
   });
 
-  it("updates display_name and returns success", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult));
+  it("updates display_name and returns the full record", async () => {
+    const pool = makeMockPool((text: string) => {
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ ...interlocutorRow5, display_name: "Alice Updated" }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "update", id: 5, display_name: "Alice Updated" });
-    expect(makeText(result)).toBe("Interlocutor 5 updated.");
+    expect(result.details).toMatchObject({ id: 5, display_name: "Alice Updated" });
+    expect(makeText(result)).toContain("Alice Updated");
   });
 
-  it("updates agent_id and returns success", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult));
+  it("updates agent_id and returns the full record", async () => {
+    const pool = makeMockPool((text: string) => {
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ ...interlocutorRow5, agent_id: 3 }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "update", id: 5, agent_id: 3 });
-    expect(makeText(result)).toBe("Interlocutor 5 updated.");
+    expect(result.details).toMatchObject({ id: 5, agent_id: 3 });
   });
 
-  it("clears agent_id when set to 0 and returns success", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult));
+  it("clears agent_id when set to 0 and returns the full record", async () => {
+    const pool = makeMockPool((text: string) => {
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ ...interlocutorRow5, agent_id: null }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "update", id: 5, agent_id: 0 });
-    expect(makeText(result)).toBe("Interlocutor 5 updated.");
+    expect(result.details).toMatchObject({ id: 5, agent_id: null });
+  });
+
+  it("returns a not-found error when the id does not exist", async () => {
+    const pool = makeMockPool((text: string) => {
+      // The UPDATE succeeds (affects zero rows silently), and the subsequent
+      // fetchInterlocutorById returns no rows because the id doesn't exist.
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+    const tool = createManageInterlocutorsTool(pool);
+    const result = await tool.execute("call-1", { action: "update", id: 999, display_name: "Ghost" });
+    expect(makeText(result)).toContain("Error:");
+    expect(makeText(result)).toContain("999");
+    expect(makeText(result)).toContain("not found");
   });
 });
 
@@ -226,11 +375,20 @@ describe("manage_interlocutors — delete", () => {
     expect(makeText(result)).toContain("Cannot modify the owner interlocutor");
   });
 
-  it("removes identities from an interlocutor and returns success", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult));
+  it("removes identities from an interlocutor and returns the full record", async () => {
+    const pool = makeMockPool((text: string) => {
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [interlocutorRow5],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "delete", id: 5 });
-    expect(makeText(result)).toBe("Identities removed from interlocutor 5.");
+    expect(result.details).toMatchObject({ id: 5 });
+    expect(makeText(result)).toContain("Bob");
   });
 });
 
@@ -263,11 +421,20 @@ describe("manage_interlocutors — add_identity", () => {
     expect(makeText(result)).toContain("identifier is required");
   });
 
-  it("adds an identity and returns success", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult));
+  it("adds an identity and returns the full record", async () => {
+    const pool = makeMockPool((text: string) => {
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ ...interlocutorRow5, service: "signal", identifier: "+1234567890" }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "add_identity", id: 5, service: "signal", identifier: "+1234567890" });
-    expect(makeText(result)).toBe("Identity added to interlocutor 5.");
+    expect(result.details).toMatchObject({ id: 5 });
+    expect(makeText(result)).toContain("+1234567890");
   });
 
   it("returns an error when the identity conflicts during add_identity", async () => {
@@ -310,11 +477,20 @@ describe("manage_interlocutors — remove_identity", () => {
     expect(makeText(result)).toContain("identifier is required");
   });
 
-  it("removes an identity and returns success", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult));
+  it("removes an identity and returns the full record", async () => {
+    const pool = makeMockPool((text: string) => {
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [interlocutorRow5],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "remove_identity", id: 5, service: "signal", identifier: "+1234567890" });
-    expect(makeText(result)).toBe("Identity removed from interlocutor 5.");
+    expect(result.details).toMatchObject({ id: 5 });
+    expect(makeText(result)).toContain("Bob");
   });
 });
 

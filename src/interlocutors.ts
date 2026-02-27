@@ -13,11 +13,12 @@ help — Show this documentation.
 create — Create a new interlocutor.
   display_name (required): Human-readable name. Must be unique.
   agent_id (optional): ID of the agent that handles inbound messages from this interlocutor. If not set, inbound messages are dropped.
+  enabled (optional): Boolean. Whether the interlocutor is enabled. Defaults to true.
   service (optional): Channel name, e.g. "signal" or "telegram".
   identifier (optional): Channel-native ID, e.g. phone number or Telegram chat ID.
   If service and identifier are provided, the identity is created along with the interlocutor.
   Both must be present or both absent.
-  Returns the created interlocutor's ID. New interlocutors are enabled by default.
+  Returns the created interlocutor record.
 
 update — Update an existing interlocutor's fields. Only provided fields are updated. Refuses to modify the owner record.
   id (required): Interlocutor ID.
@@ -55,6 +56,64 @@ To talk to another person to complete some task:
 
 The agent_id determines which agent handles inbound messages from this interlocutor. If agent_id is null or the interlocutor is disabled, inbound messages are dropped.`;
 
+interface InterlocutorRecord {
+  id: number;
+  display_name: string;
+  agent_id: number | null;
+  owner: boolean;
+  enabled: boolean;
+  created_at: Date;
+  identities: Array<{ service: string; identifier: string }>;
+}
+
+async function fetchInterlocutorById(
+  pool: pg.Pool,
+  id: number,
+): Promise<InterlocutorRecord | undefined> {
+  const result = await pool.query<{
+    id: number;
+    display_name: string;
+    agent_id: number | null;
+    owner: boolean;
+    enabled: boolean;
+    created_at: Date;
+    service: string | null;
+    identifier: string | null;
+  }>(
+    `SELECT i.id, i.display_name, i.agent_id, i.owner, i.enabled, i.created_at,
+            ii.service, ii.identifier
+     FROM interlocutors i
+     LEFT JOIN interlocutor_identities ii ON ii.interlocutor_id = i.id AND ii.identifier IS NOT NULL
+     WHERE i.id = $1
+     ORDER BY ii.id`,
+    [id],
+  );
+
+  if (result.rows.length === 0) {
+    return undefined;
+  }
+
+  const ownerInterlocutorId = getOwnerInterlocutorId();
+  const first = result.rows[0];
+  const record: InterlocutorRecord = {
+    id: first.id,
+    display_name: first.display_name,
+    agent_id: first.agent_id,
+    owner: first.id === ownerInterlocutorId,
+    enabled: first.enabled,
+    created_at: first.created_at,
+    identities: [],
+  };
+
+  for (const row of result.rows) {
+    if (row.service !== null && row.identifier !== null) {
+      record.identities.push({ service: row.service, identifier: row.identifier });
+    }
+  }
+
+  return record;
+}
+
 export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
   return {
     name: "manage_interlocutors",
@@ -80,7 +139,7 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
     execute: async (
       toolCallId: string,
       params: unknown
-    ): Promise<AgentToolResult<{ message: string }>> => {
+    ): Promise<AgentToolResult<{ message: string } | InterlocutorRecord>> => {
       const raw = params as {
         action: string;
         display_name?: string;
@@ -127,10 +186,20 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
         let newId: number;
         try {
           await client.query("BEGIN");
-          const result = await client.query<{ id: number }>(
-            "INSERT INTO interlocutors (display_name, agent_id) VALUES ($1, $2) RETURNING id",
-            [raw.display_name.trim(), raw.agent_id ?? null],
-          );
+
+          // Include enabled in the INSERT only when explicitly provided so the DB
+          // default (TRUE) applies when the caller omits it.
+          let insertQuery: string;
+          let insertValues: unknown[];
+          if (raw.enabled !== undefined) {
+            insertQuery = "INSERT INTO interlocutors (display_name, agent_id, enabled) VALUES ($1, $2, $3) RETURNING id";
+            insertValues = [raw.display_name.trim(), raw.agent_id ?? null, raw.enabled];
+          } else {
+            insertQuery = "INSERT INTO interlocutors (display_name, agent_id) VALUES ($1, $2) RETURNING id";
+            insertValues = [raw.display_name.trim(), raw.agent_id ?? null];
+          }
+
+          const result = await client.query<{ id: number }>(insertQuery, insertValues);
           newId = result.rows[0].id;
           if (hasService && hasIdentifier) {
             const identityResult = await client.query(
@@ -155,11 +224,19 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
           client.release();
         }
 
-        const message = `Interlocutor ${newId} created.`;
-        console.log(`[stavrobot] ${message}`);
+        console.log(`[stavrobot] Interlocutor ${newId} created.`);
+        const record = await fetchInterlocutorById(pool, newId);
+        if (record === undefined) {
+          const errorMessage = `Error: interlocutor ${newId} not found.`;
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+        const text = encodeToToon(record);
         return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
+          content: [{ type: "text" as const, text }],
+          details: record,
         };
       }
 
@@ -211,11 +288,19 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
           values,
         );
 
-        const message = `Interlocutor ${raw.id} updated.`;
-        console.log(`[stavrobot] ${message}`);
+        console.log(`[stavrobot] Interlocutor ${raw.id} updated.`);
+        const record = await fetchInterlocutorById(pool, raw.id);
+        if (record === undefined) {
+          const errorMessage = `Error: interlocutor ${raw.id} not found.`;
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+        const text = encodeToToon(record);
         return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
+          content: [{ type: "text" as const, text }],
+          details: record,
         };
       }
 
@@ -240,11 +325,19 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
           [raw.id],
         );
 
-        const message = `Identities removed from interlocutor ${raw.id}.`;
-        console.log(`[stavrobot] ${message}`);
+        console.log(`[stavrobot] Identities removed from interlocutor ${raw.id}.`);
+        const record = await fetchInterlocutorById(pool, raw.id);
+        if (record === undefined) {
+          const errorMessage = `Error: interlocutor ${raw.id} not found.`;
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+        const text = encodeToToon(record);
         return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
+          content: [{ type: "text" as const, text }],
+          details: record,
         };
       }
 
@@ -291,11 +384,19 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
           };
         }
 
-        const message = `Identity added to interlocutor ${raw.id}.`;
-        console.log(`[stavrobot] ${message}`);
+        console.log(`[stavrobot] Identity added to interlocutor ${raw.id}.`);
+        const record = await fetchInterlocutorById(pool, raw.id);
+        if (record === undefined) {
+          const errorMessage = `Error: interlocutor ${raw.id} not found.`;
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+        const text = encodeToToon(record);
         return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
+          content: [{ type: "text" as const, text }],
+          details: record,
         };
       }
 
@@ -334,11 +435,19 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
           [raw.id, raw.service.trim(), raw.identifier.trim()],
         );
 
-        const message = `Identity removed from interlocutor ${raw.id}.`;
-        console.log(`[stavrobot] ${message}`);
+        console.log(`[stavrobot] Identity removed from interlocutor ${raw.id}.`);
+        const record = await fetchInterlocutorById(pool, raw.id);
+        if (record === undefined) {
+          const errorMessage = `Error: interlocutor ${raw.id} not found.`;
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+        const text = encodeToToon(record);
         return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
+          content: [{ type: "text" as const, text }],
+          details: record,
         };
       }
 
