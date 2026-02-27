@@ -51,7 +51,9 @@ export async function handlePutAllowlistRequest(
     return;
   }
 
-  const trimmedSignal = (obj.signal as string[]).map((item) => item.trim());
+  // Strip Unicode directional and formatting characters (e.g. U+2068/U+2069)
+  // that messaging apps silently wrap around phone numbers when copying.
+  const trimmedSignal = (obj.signal as string[]).map((item) => item.replace(/[\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFEFF]/g, "").trim());
   if (trimmedSignal.some((item) => item.length === 0)) {
     response.writeHead(400, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ error: "'signal' must be an array of non-empty strings" }));
@@ -307,7 +309,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
 
     function addSignalEntry() {
       const input = document.getElementById("signal-input");
-      const value = input.value.trim();
+      const value = input.value.replace(/[\\u200B-\\u200F\\u2028-\\u202F\\u2060-\\u206F\\uFEFF]/g, "").trim();
       if (!value) return;
       if (!/^\\+[1-9]\\d{1,14}$/.test(value)) {
         setStatus("Invalid number: must be in E.164 format (e.g. +1234567890).", true);
