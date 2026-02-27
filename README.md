@@ -111,6 +111,36 @@ as prose.
 The bot will usually know well enough what to use when, but sometimes you will want to
 tell it explicitly what information to put where.
 
+## Talking to other people
+
+Stavrobot can message people on your behalf over Signal or Telegram. Need to schedule a
+dinner with a friend? Tell the bot to find a time that works for both of you, and it
+will message them, negotiate a date, and put it on your calendar. Want to arrange an
+appointment, coordinate a group outing, or ask someone a question while you're busy?
+Just tell the bot what you need and who to talk to.
+
+The bot spins up a dedicated subagent for each conversation, with its own instructions
+and context, so it can handle back-and-forth with the other person without cluttering
+your main chat. When the task is done, it disables the contact and reports back to you.
+
+To keep things safe, messaging is controlled by two layers:
+
+**Config allowlist (you control this).** You decide who the bot is allowed to contact by
+adding phone numbers or chat IDs to `allowedNumbers` (Signal) or `allowedChatIds`
+(Telegram) in `config.toml`. The bot cannot modify this list or message anyone not on
+it, no matter what.
+
+**Contact records (the bot controls these).** Within the people you've approved, the bot
+manages its own contact list in the database. It creates a contact when it needs to talk
+to someone, and disables it when the conversation is done. A disabled contact blocks all
+messaging in both directions, so the bot can't accidentally keep chatting with someone
+after a task is finished. Re-enabling a contact later picks up where things left off.
+
+A typical flow looks like this: you add your friend's phone number to the config
+allowlist once, then tell the bot "find a time for dinner with Alex next week". The bot
+creates a contact record for Alex, spins up a subagent, messages Alex on Signal, goes
+back and forth to find a date, and reports the result to you.
+
 ## Skills
 
 Skills are plain-text instruction files that teach the bot new capabilities — things like
