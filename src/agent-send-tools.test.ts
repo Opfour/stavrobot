@@ -53,6 +53,16 @@ function makeIdentityFoundPool(identifier: string): Pool {
   );
 }
 
+// A pool that captures the SQL query text for assertion and returns no rows.
+function makeCapturingPool(): { pool: Pool; capturedQuery: { text: string | undefined } } {
+  const capturedQuery: { text: string | undefined } = { text: undefined };
+  const pool = makeMockPool((text: string) => {
+    capturedQuery.text = text;
+    return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+  });
+  return { pool, capturedQuery };
+}
+
 describe("isInAllowlist (via send tools)", () => {
   it("send_signal_message rejects when recipient is not in allowlist", async () => {
     vi.mocked(resolveRecipient).mockResolvedValue(null);
@@ -134,6 +144,29 @@ describe("send_signal_message — recipient resolution", () => {
     const result = await tool.execute("call-1", { recipient: "Mom", message: "hello" });
     expect(makeText(result)).toContain('Interlocutor "Mom" is disabled');
   });
+
+  it("rejects with unknown recipient when raw phone number belongs to a disabled interlocutor", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    // The pool returns no rows because the JOIN filters out disabled interlocutors.
+    const pool = makeEmptyPool();
+    const config = makeConfig();
+    const tool = createSendSignalMessageTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "+1234567890", message: "hello" });
+    expect(makeText(result)).toContain("unknown recipient");
+  });
+
+  it("uses a query that joins interlocutors and checks enabled=true for the Signal raw-ID path", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    const { pool, capturedQuery } = makeCapturingPool();
+    const config = makeConfig();
+    const tool = createSendSignalMessageTool(pool, config);
+    await tool.execute("call-1", { recipient: "+1234567890", message: "hello" });
+    expect(capturedQuery.text).toContain("JOIN interlocutors");
+    expect(capturedQuery.text).toContain("enabled = true");
+    expect(capturedQuery.text).toContain("service = 'signal'");
+  });
 });
 
 describe("send_telegram_message — recipient resolution", () => {
@@ -195,5 +228,28 @@ describe("send_telegram_message — recipient resolution", () => {
     const tool = createSendTelegramMessageTool(pool, config);
     const result = await tool.execute("call-1", { recipient: "Mom", message: "hello" });
     expect(makeText(result)).toContain('Interlocutor "Mom" is disabled');
+  });
+
+  it("rejects with unknown recipient when raw chat ID belongs to a disabled interlocutor", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    // The pool returns no rows because the JOIN filters out disabled interlocutors.
+    const pool = makeEmptyPool();
+    const config = makeConfig();
+    const tool = createSendTelegramMessageTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "99999", message: "hello" });
+    expect(makeText(result)).toContain("unknown recipient");
+  });
+
+  it("uses a query that joins interlocutors and checks enabled=true for the Telegram raw-ID path", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    const { pool, capturedQuery } = makeCapturingPool();
+    const config = makeConfig();
+    const tool = createSendTelegramMessageTool(pool, config);
+    await tool.execute("call-1", { recipient: "99999", message: "hello" });
+    expect(capturedQuery.text).toContain("JOIN interlocutors");
+    expect(capturedQuery.text).toContain("enabled = true");
+    expect(capturedQuery.text).toContain("service = 'telegram'");
   });
 });

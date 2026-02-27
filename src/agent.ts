@@ -386,9 +386,9 @@ export function createSendSignalMessageTool(pool: pg.Pool, config: Config): Agen
             details: { message: errorMessage },
           };
         }
-        // Soft gate: raw ID must exist in interlocutor_identities.
+        // Soft gate: raw ID must exist in interlocutor_identities for an enabled interlocutor.
         const identityCheck = await pool.query<{ identifier: string }>(
-          "SELECT identifier FROM interlocutor_identities WHERE service = 'signal' AND identifier = $1",
+          "SELECT ii.identifier FROM interlocutor_identities ii JOIN interlocutors i ON i.id = ii.interlocutor_id WHERE ii.service = 'signal' AND ii.identifier = $1 AND i.enabled = true",
           [recipientInput],
         );
         if (identityCheck.rows.length === 0) {
@@ -559,9 +559,9 @@ export function createSendTelegramMessageTool(pool: pg.Pool, config: Config): Ag
             details: { message: errorMessage },
           };
         }
-        // Soft gate: raw ID must exist in interlocutor_identities.
+        // Soft gate: raw ID must exist in interlocutor_identities for an enabled interlocutor.
         const identityCheck = await pool.query<{ identifier: string }>(
-          "SELECT identifier FROM interlocutor_identities WHERE service = 'telegram' AND identifier = $1",
+          "SELECT ii.identifier FROM interlocutor_identities ii JOIN interlocutors i ON i.id = ii.interlocutor_id WHERE ii.service = 'telegram' AND ii.identifier = $1 AND i.enabled = true",
           [recipientInput],
         );
         if (identityCheck.rows.length === 0) {
