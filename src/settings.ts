@@ -376,7 +376,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       const input = document.getElementById("signal-input");
       const value = input.value.replace(/[\\u200B-\\u200F\\u2028-\\u202F\\u2060-\\u206F\\uFEFF]/g, "").trim();
       if (!value) return;
-      if (!/^\\+[1-9]\\d{1,14}$/.test(value)) {
+      if (value !== "*" && !/^\\+[1-9]\\d{1,14}$/.test(value)) {
         setStatus("Invalid number: must be in E.164 format (e.g. +1234567890).", true);
         return;
       }
@@ -395,6 +395,18 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       const input = document.getElementById("telegram-input");
       const raw = input.value.trim();
       if (!raw) return;
+      if (raw === "*") {
+        if (telegramEntries.includes("*")) {
+          setStatus("That chat ID is already in the list.", true);
+          return;
+        }
+        telegramEntries.push("*");
+        input.value = "";
+        renderTelegramList();
+        setStatus("", false);
+        saveAllowlist();
+        return;
+      }
       const value = parseInt(raw, 10);
       if (!Number.isInteger(value) || String(value) !== raw) {
         setStatus("Telegram chat ID must be an integer.", true);
@@ -415,7 +427,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       const input = document.getElementById("whatsapp-input");
       const value = input.value.replace(/[\\u200B-\\u200F\\u2028-\\u202F\\u2060-\\u206F\\uFEFF]/g, "").trim();
       if (!value) return;
-      if (!/^\\+[1-9]\\d{1,14}$/.test(value)) {
+      if (value !== "*" && !/^\\+[1-9]\\d{1,14}$/.test(value)) {
         setStatus("Invalid number: must be in E.164 format (e.g. +1234567890).", true);
         return;
       }
