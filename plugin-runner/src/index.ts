@@ -73,7 +73,7 @@ function getPluginUserIds(pluginName: string): { uid: number; gid: number } {
 interface BundleManifest {
   name: string;
   description: string;
-  config?: Record<string, { description: string; required: boolean }>;
+  config?: Record<string, { description: string; required: boolean; default?: unknown }>;
   instructions?: string;
   init?: { entrypoint: string; async?: boolean };
 }
@@ -815,6 +815,58 @@ async function handleCreate(
   response.end(JSON.stringify({ message: `Plugin '${pluginName}' created successfully.` }));
 }
 
+// Write default config values for any keys declared with a `default` field in
+// the manifest that are not already present in config.json. Existing values
+// always win over defaults, so this is safe to call on update as well.
+// Returns the set of keys that were written from defaults (may be empty).
+function applyConfigDefaults(
+  bundleDir: string,
+  manifestConfig: Record<string, { description: string; required: boolean; default?: unknown }>,
+  uid: number,
+  gid: number,
+): Set<string> {
+  const defaults: Record<string, unknown> = {};
+  for (const [key, meta] of Object.entries(manifestConfig)) {
+    if ("default" in meta) {
+      defaults[key] = meta.default;
+    }
+  }
+
+  if (Object.keys(defaults).length === 0) {
+    return new Set();
+  }
+
+  const configPath = path.join(bundleDir, "config.json");
+  const existingConfig = readJsonFile(configPath);
+  const existingConfigObject =
+    typeof existingConfig === "object" && existingConfig !== null
+      ? (existingConfig as Record<string, unknown>)
+      : {};
+
+  // Existing values take precedence over defaults.
+  const merged = { ...defaults, ...existingConfigObject };
+
+  const appliedKeys = new Set<string>();
+  for (const key of Object.keys(defaults)) {
+    if (!(key in existingConfigObject)) {
+      appliedKeys.add(key);
+    }
+  }
+
+  if (appliedKeys.size === 0) {
+    return appliedKeys;
+  }
+
+  fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
+  fs.chownSync(configPath, uid, gid);
+
+  console.log(
+    `[stavrobot-plugin-runner] Applied default config keys for plugin in ${bundleDir}: ${[...appliedKeys].join(", ")}`
+  );
+
+  return appliedKeys;
+}
+
 async function handleInstall(
   request: http.IncomingMessage,
   response: http.ServerResponse
@@ -929,6 +981,11 @@ async function handleInstall(
 
   loadBundles();
 
+  let appliedDefaults = new Set<string>();
+  if (rawManifest.config !== undefined) {
+    appliedDefaults = applyConfigDefaults(destDir, rawManifest.config, uid, gid);
+  }
+
   const responseBody: Record<string, unknown> = {
     name: rawManifest.name,
     description: rawManifest.description,
@@ -938,14 +995,28 @@ async function handleInstall(
 
   if (rawManifest.config !== undefined) {
     responseBody["config"] = rawManifest.config;
+    // Only list entries that still need user action (no default declared in manifest).
     const configEntries = Object.entries(rawManifest.config);
-    const parts = configEntries.map(
-      ([key, meta]) => `${key} (${meta.description}${meta.required ? ", required" : ", optional"})`
-    );
-    messageParts.push(
-      `Plugin '${pluginName}' installed successfully. Configuration required: ${parts.join(", ")}. ` +
-      `Use configure_plugin to set these values, or ask the user to create config.json manually for sensitive values.`
-    );
+    const needsConfig = configEntries.filter(([, meta]) => !("default" in meta));
+    if (needsConfig.length > 0) {
+      const parts = needsConfig.map(
+        ([key, meta]) => `${key} (${meta.description}${meta.required ? ", required" : ", optional"})`
+      );
+      messageParts.push(
+        `Plugin '${pluginName}' installed successfully. Configuration required: ${parts.join(", ")}. ` +
+        `Use configure_plugin to set these values, or ask the user to create config.json manually for sensitive values.`
+      );
+    } else {
+      messageParts.push(
+        `Plugin '${pluginName}' installed successfully. ` +
+        `Use show_plugin(name) to see available tools, then run_plugin_tool(plugin, tool, parameters) to run them.`
+      );
+    }
+    if (appliedDefaults.size > 0) {
+      messageParts.push(
+        `The following config keys were set to their defaults: ${[...appliedDefaults].join(", ")}.`
+      );
+    }
   } else {
     messageParts.push(
       `Plugin '${pluginName}' installed successfully. ` +
@@ -1087,6 +1158,10 @@ async function handleUpdate(
   // Re-read the manifest after the update so the response reflects the new state.
   const updatedBundle = findBundle(pluginName);
   const updatedManifest = updatedBundle?.manifest;
+
+  if (updatedManifest?.config !== undefined) {
+    applyConfigDefaults(pluginDir, updatedManifest.config, uid, gid);
+  }
 
   const responseBody: Record<string, unknown> = {
     name: updatedManifest?.name ?? pluginName,

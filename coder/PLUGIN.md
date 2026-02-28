@@ -74,7 +74,8 @@ The plugin manifest can declare an optional `config` field listing configuration
     },
     "calendar_id": {
       "description": "Default calendar ID",
-      "required": false
+      "required": false,
+      "default": "primary"
     }
   }
 }
@@ -84,6 +85,7 @@ Each config entry has:
 
 - `description` (string, required): Explains what this value is for.
 - `required` (boolean, required): Whether the plugin needs this value to function.
+- `default` (any, optional): An initial value written to `config.json` at install time (and for newly-added keys on update). Once written, it behaves like any user-set value and can be overwritten with `configure_plugin`. Keys with a default do not require user action after install.
 
 Configuration values are stored in a `config.json` file at the plugin's root directory (next to `manifest.json`). This file is not part of the git repo — it is created after installation. It is a plain JSON object mapping config keys to their values:
 
