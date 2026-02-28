@@ -1516,11 +1516,6 @@ export async function handlePrompt(
           .map((block) => block.text)
           .join("");
 
-        if (STAVROBOT_DEBUG) {
-          console.log(`[stavrobot] [debug] Summary output (${summaryText.length} chars):`);
-          console.log(summaryText);
-        }
-
         const previousCompaction = await loadLatestCompaction(pool, agentId);
         const previousBoundary = previousCompaction ? previousCompaction.upToMessageId : 0;
 
