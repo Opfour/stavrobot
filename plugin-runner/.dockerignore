@@ -2,4 +2,6 @@ node_modules
 dist
 .git
 config.json
+.env
 data
+__pycache__

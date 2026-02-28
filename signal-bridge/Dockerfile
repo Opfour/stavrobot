@@ -18,8 +18,7 @@ RUN curl -L "https://github.com/AsamK/signal-cli/releases/download/v${SIGNAL_CLI
     rm /tmp/signal-cli.tar.gz
 
 # Copy the bridge script and supporting modules.
-COPY bridge.py /app/bridge.py
-COPY markdown_to_signal.py /app/markdown_to_signal.py
+COPY . /app/
 RUN chmod +x /app/bridge.py
 
 WORKDIR /app
