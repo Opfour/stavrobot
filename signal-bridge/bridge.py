@@ -462,9 +462,9 @@ def process_signal_event(
     log(f"dataMessage keys={list(data_message.keys())}, message_text={message_text!r}")
 
     if message_text:
-        text_formatting: list[dict] = data_message.get("textFormatting", [])
-        if text_formatting:
-            message_text = convert_signal_to_markdown(message_text, text_formatting)
+        text_styles: list[dict] = data_message.get("textStyles", [])
+        if text_styles:
+            message_text = convert_signal_to_markdown(message_text, text_styles)
             log(f"Converted Signal formatting to Markdown: {message_text!r}")
 
     # Check for audio attachments and forward them to the agent API as base64.
