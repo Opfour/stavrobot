@@ -352,7 +352,10 @@ async function runScript(
 ): Promise<ScriptResult> {
   const pluginName = path.relative(PLUGINS_DIR, cwd).split(path.sep)[0];
   const uvCacheDir = `/cache/${pluginName}/uv`;
+  const homeDir = `/cache/${pluginName}/home`;
   fs.mkdirSync(uvCacheDir, { recursive: true });
+  fs.mkdirSync(homeDir, { recursive: true });
+  fs.chmodSync(homeDir, 0o700);
   execFileSync("chown", ["-R", `${uid}:${gid}`, `/cache/${pluginName}`], { stdio: "pipe" });
 
   return new Promise<ScriptResult>((resolve) => {
@@ -364,6 +367,7 @@ async function runScript(
         PATH: process.env.PATH,
         UV_CACHE_DIR: uvCacheDir,
         UV_PYTHON_INSTALL_DIR: "/opt/uv/python",
+        HOME: homeDir,
       },
     });
 

@@ -237,7 +237,7 @@ The following runtimes and tools are available in the container:
 - `curl`
 - `build-essential` (gcc, make, etc.)
 
-The environment passed to the tool process is minimal: only `PATH`, `UV_CACHE_DIR`, and `UV_PYTHON_INSTALL_DIR` are set. Variables like `HOME`, `USER`, and `PYTHONPATH` are not set.
+The environment passed to the tool process is minimal: only `PATH`, `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, and `HOME` are set. `HOME` points to a writable per-plugin cache directory (`/cache/<plugin-name>/home`). Variables like `USER` and `PYTHONPATH` are not set.
 
 ## How tools are called
 
