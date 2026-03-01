@@ -33,20 +33,6 @@ function buildPromptSuffix(publicHostname: string): string {
   return `\n\nYour external hostname is ${publicHostname}. All times are in ${timezone}. Do not convert times to other timezones unless explicitly asked, or the user is in another timezone.`;
 }
 
-function formatMessageDump(header: string, messages: AgentMessage[]): string {
-  const lines = [header];
-  for (let i = 0; i < messages.length; i++) {
-    const message = messages[i];
-    const textPreview = typeof message.content === "string"
-      ? message.content.slice(0, 200)
-      : Array.isArray(message.content)
-        ? message.content.filter((block): block is TextContent => block.type === "text").map((block) => block.text).join("").slice(0, 200)
-        : "";
-    lines.push(`[stavrobot] [debug]   [${i}] role=${message.role} text=${textPreview}`);
-  }
-  return lines.join("\n");
-}
-
 // A simple boolean flag to prevent concurrent compaction runs. If a compaction
 // is already in progress when another request triggers the threshold, we skip
 // rather than queue, because queuing would compact already-compacted messages.
@@ -1211,7 +1197,7 @@ export async function handlePrompt(
     compactionCompletedForAgent = null;
     console.log(`[stavrobot] Cleared compaction-completed flag for agent ${agentId}.`);
     if (STAVROBOT_DEBUG) {
-      console.log(formatMessageDump("[stavrobot] [debug] Reloaded messages:", conversationMessages));
+      console.log(`[stavrobot] [debug] Reloaded ${conversationMessages.length} messages`);
     }
   }
 
@@ -1438,7 +1424,7 @@ export async function handlePrompt(
     const currentMessages = agent.state.messages.slice();
 
     if (STAVROBOT_DEBUG) {
-      console.log(formatMessageDump(`[stavrobot] [debug] Compaction triggered: ${currentMessages.length} messages in memory`, currentMessages));
+      console.log(`[stavrobot] [debug] Compaction triggered: ${currentMessages.length} messages in memory`);
     }
 
     void (async () => {

@@ -54,7 +54,9 @@ To talk to another person to complete some task:
 4. Send the subagent its first message via send_agent_message. The subagent will handle the conversation in its own context and can message you back if it needs information or tools.
 5. When the task is done, disable the interlocutor (set enabled: false). This stops both inbound and outbound messages. The agent assignment stays in place, so you can re-enable the interlocutor later to resume.
 
-The agent_id determines which agent handles inbound messages from this interlocutor. If agent_id is null or the interlocutor is disabled, inbound messages are dropped.`;
+The agent_id determines which agent handles inbound messages from this interlocutor. If agent_id is null or the interlocutor is disabled, inbound messages are dropped.
+
+Messaging service allowlists: Creating an interlocutor with a channel identity is NOT enough to allow an agent to message that person. Each messaging service (Signal, Telegram, etc.) has its own allowlist/whitelist that must be configured by Stavros manually. If an agent gets "not in allowlist" errors when trying to send a message, ask Stavros to add the identifier (phone number, chat ID, etc.) to the relevant service's whitelist.`;
 
 interface InterlocutorRecord {
   id: number;
