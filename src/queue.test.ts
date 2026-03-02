@@ -126,6 +126,18 @@ describe("message routing", () => {
     expect(mockResolveInterlocutor).not.toHaveBeenCalled();
   });
 
+  it("routes upload messages to the owner conversation", async () => {
+    const attachment = { storedPath: "/tmp/upload-abc.jpg", originalFilename: "photo.jpg", mimeType: "image/jpeg", size: 1024 };
+    await enqueueMessage(undefined, "upload", undefined, undefined, undefined, [attachment]);
+
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+    const routingArg = mockHandlePrompt.mock.calls[0][4] as RoutingResult;
+    expect(routingArg.isMainAgent).toBe(true);
+    expect(routingArg.agentId).toBe(1);
+    expect(routingArg.senderLabel).toBe("upload");
+    expect(mockResolveInterlocutor).not.toHaveBeenCalled();
+  });
+
   it("routes plugin:* messages to the owner conversation", async () => {
     await enqueueMessage("result", "plugin:myplugin", undefined);
 

@@ -59,7 +59,7 @@ function sleep(milliseconds: number): Promise<void> {
 // Internal sources are system-generated (not from external interlocutors) and
 // always route to the owner conversation.
 function isInternalSource(source: string): boolean {
-  return source === "cli" || source === "cron" || source === "coder" || source.startsWith("plugin:");
+  return source === "cli" || source === "cron" || source === "coder" || source === "upload" || source.startsWith("plugin:");
 }
 
 async function resolveTargetAgent(
