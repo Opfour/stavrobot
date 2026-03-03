@@ -438,6 +438,40 @@ Key config sections:
 
 PostgreSQL connection is configured via environment variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`), defaulting to `postgres:5432/stavrobot`.
 
+## UI components
+
+All UI is server-rendered HTML with inlined CSS and JavaScript. There is no frontend build step, no component framework, and no static file serving.
+
+### Shared design tokens
+
+All pages use the same system font stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`), background colour `#f8f9fa`, and accent colour `#d97706` (amber). Cards use `background: #fff` with `box-shadow: 0 1px 3px rgba(0,0,0,0.08)` and `border-radius: 8px`.
+
+### Row-detail modal (`src/explorer.ts`)
+
+The database explorer has a full-screen overlay modal (`#row-modal`) that opens when a table row is clicked. Implementation details:
+
+- Overlay: `position: fixed; inset: 0; background: rgba(0,0,0,0.45)` with `display: none` / `display: flex` toggled via the `.open` class.
+- Card: `#row-modal-card` — `max-width: 600px; max-height: 80vh; border-radius: 12px; overflow-y: auto`.
+- On mobile (`max-width: 768px`) the card slides up from the bottom: `align-items: flex-end` on the overlay, `border-radius: 12px 12px 0 0` on the card.
+- Closed by clicking the backdrop (checked via `event.target === overlay`), the ✕ button, or the Escape key.
+- Row data is stored directly on `<tr>` elements as `_rowData` to avoid re-fetching.
+
+### Plugin cards (`src/plugins.ts`)
+
+Each installed plugin is rendered as a collapsible `.plugin-card` div:
+
+- Collapsed by default (`.collapsed` class hides `.plugin-body`).
+- A chevron (`▶`) rotates 90° when expanded via CSS `transform`.
+- Left border colour indicates permission state: green (`.perm-all`), amber (`.perm-selected`), red (`.perm-disabled`).
+- Clicking the header or the collapsed card body toggles expansion.
+
+### Markdown rendering (`src/home.ts`, `src/telegram.ts`)
+
+- **Home page chat panel:** Agent responses are rendered as HTML using `marked` loaded from jsDelivr CDN (`https://cdn.jsdelivr.net/npm/marked/marked.min.js`). Called as `marked.parse(responseText)` and set via `innerHTML`. CSS for rendered markdown (paragraphs, lists, code blocks, blockquotes, headings, links) is inlined in the page.
+- **Telegram outbound messages:** A custom `Marked` renderer (`telegramRenderer` in `src/telegram.ts`) converts markdown to Telegram's HTML subset (`<b>`, `<i>`, `<s>`, `<code>`, `<pre>`, `<a>`, `<blockquote>`). Headings become bold, lists become plain text with bullet/number characters, images become alt text.
+- **Signal outbound messages:** The signal-bridge converts markdown to Signal text styles (handled in `signal-bridge/`).
+- The `marked` package (v17) is a production dependency in `package.json`.
+
 ## Conventions
 
 ### TypeScript

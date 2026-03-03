@@ -134,6 +134,7 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Database explorer</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -344,7 +345,10 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     .modal-field-value {
       font-size: 13px;
       word-break: break-word;
-      white-space: pre-wrap;
+    }
+    .modal-field-value ul,
+    .modal-field-value ol {
+      padding-left: 1.5em;
     }
     @media (max-width: 768px) {
       body {
@@ -638,7 +642,7 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       if (typeof value === "object") {
         return '<span class="json-value">' + escapeHtml(JSON.stringify(value)) + '</span>';
       }
-      return escapeHtml(String(value)).replace(/\\n/g, '<br>');
+      return marked.parse(String(value));
     }
 
     document.addEventListener("keydown", function(event) {
