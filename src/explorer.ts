@@ -249,14 +249,12 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     th:hover { background: #f0f0f0; }
     th .sort-indicator { margin-left: 4px; color: #999; }
     tbody tr { cursor: pointer; transition: background 0.15s ease; }
-    tbody tr:hover td { background: #fafafa; }
-    tbody tr.expanded td {
+    tbody tr:hover td {
+      background: #fafafa;
       white-space: pre-wrap;
       word-break: break-word;
       max-width: none;
-      background: #fffbeb;
     }
-    tbody tr.expanded:hover td { background: #fff7dc; }
     #pagination {
       padding: 12px 24px;
       background: #fff;
@@ -294,7 +292,7 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       inset: 0;
       z-index: 100;
       background: rgba(0, 0, 0, 0.45);
-      align-items: flex-end;
+      align-items: center;
       justify-content: center;
     }
     #row-modal.open {
@@ -303,9 +301,10 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     #row-modal-card {
       background: #fff;
       width: 100%;
+      max-width: 600px;
       max-height: 80vh;
       overflow-y: auto;
-      border-radius: 12px 12px 0 0;
+      border-radius: 12px;
       padding: 16px;
     }
     #row-modal-header {
@@ -389,6 +388,14 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       }
       #pagination {
         padding: 10px 16px;
+      }
+      #row-modal {
+        align-items: flex-end;
+      }
+      #row-modal-card {
+        width: 100%;
+        max-width: none;
+        border-radius: 12px 12px 0 0;
       }
     }
   </style>
@@ -593,15 +600,7 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     }
 
     function handleRowClick(row, rowIndex) {
-      if (window.innerWidth <= 768) {
-        openRowModal(row._rowData);
-      } else {
-        toggleRowExpand(row);
-      }
-    }
-
-    function toggleRowExpand(row) {
-      row.classList.toggle("expanded");
+      openRowModal(row._rowData);
     }
 
     function openRowModal(rowData) {
@@ -641,6 +640,12 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       }
       return escapeHtml(String(value)).replace(/\\n/g, '<br>');
     }
+
+    document.addEventListener("keydown", function(event) {
+      if (event.key === "Escape") {
+        closeRowModal();
+      }
+    });
 
     loadTables();
   </script>

@@ -75,7 +75,7 @@ const MANAGE_KNOWLEDGE_HELP_TEXT = `manage_knowledge: upsert or delete entries i
 
 Stores:
 - memory: full content is injected into the system prompt every turn. Use for frequently needed facts, user preferences, and anything that should always be in context. Keep entries concise — they consume context on every request.
-- scratchpad: only titles are injected each turn; bodies are read on demand via execute_sql. Use for less frequent, longer-form knowledge such as reference material, detailed notes, or anything that doesn't need to be in context every turn.
+- scratchpad: only titles are injected each turn; bodies are read on demand via execute_sql. Use for less frequent, longer-form knowledge such as reference material, detailed notes, or anything that doesn't need to be in context every turn. Note here anything you learn about the user. Keep titles short and descriptive (under 50 characters) so you can tell at a glance what each entry contains.
 
 Actions:
 - upsert: create or update an entry. Parameters: store (required), id (omit to create, provide to update), content (required for memory), title (required for scratchpad), body (required for scratchpad).
