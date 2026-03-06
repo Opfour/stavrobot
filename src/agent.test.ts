@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { AgentMessage, AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection } from "./agent.js";
+import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext } from "./agent.js";
 
 // Helper to build a minimal assistant message without filling in all required
 // fields that the serializer never reads (api, provider, model, usage).
@@ -467,5 +467,188 @@ describe("formatPluginListSection", () => {
     expect(result).toBe(
       "Available plugins:\n- hackernews: Hacker News integration\n  Tools: get_front_page, get_comments\n- weather: Weather forecasts",
     );
+  });
+});
+
+describe("truncateContext", () => {
+  // Each character is 1/4 token, so 4 chars = 1 token.
+
+  it("returns messages unchanged when total tokens are within budget", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "Hello", timestamp: 0 },
+    ];
+    // "Hello" = 5 chars = 1.25 tokens; budget of 10 is plenty.
+    const result = truncateContext(messages, 10);
+    expect(result).toBe(messages);
+  });
+
+  it("returns the same array reference when no truncation is needed", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "Hi", timestamp: 0 },
+    ];
+    const result = truncateContext(messages, 100);
+    expect(result).toBe(messages);
+  });
+
+  it("truncates a string-content user message that exceeds the budget", () => {
+    // 40 chars = 10 tokens; budget = 5 tokens.
+    const longText = "a".repeat(40);
+    const messages: AgentMessage[] = [
+      { role: "user", content: longText, timestamp: 0 },
+    ];
+    const result = truncateContext(messages, 5);
+    expect(result).not.toBe(messages);
+    const content = (result[0] as { role: string; content: string }).content;
+    expect(content).toContain("[truncated]");
+    expect(content.length).toBeLessThan(longText.length);
+  });
+
+  it("truncates a text block in a tool result message", () => {
+    // 400 chars = 100 tokens; budget = 10 tokens.
+    const longText = "x".repeat(400);
+    const messages: AgentMessage[] = [
+      {
+        role: "toolResult",
+        toolCallId: "tc1",
+        toolName: "execute_sql",
+        content: [{ type: "text", text: longText }],
+        isError: false,
+        timestamp: 0,
+      } as unknown as AgentMessage,
+    ];
+    const result = truncateContext(messages, 10);
+    expect(result).not.toBe(messages);
+    const block = (result[0] as { content: Array<{ type: string; text: string }> }).content[0];
+    expect(block.text).toContain("[truncated]");
+    expect(block.text.length).toBeLessThan(longText.length);
+  });
+
+  it("truncates the largest text block first when multiple blocks exist", () => {
+    // Small block: 40 chars = 10 tokens. Large block: 400 chars = 100 tokens.
+    // Budget = 30 tokens. Total = 110 tokens, excess = 80 tokens = 320 chars.
+    const smallText = "s".repeat(40);
+    const largeText = "L".repeat(400);
+    const messages: AgentMessage[] = [
+      {
+        role: "toolResult",
+        toolCallId: "tc1",
+        toolName: "execute_sql",
+        content: [
+          { type: "text", text: smallText },
+          { type: "text", text: largeText },
+        ],
+        isError: false,
+        timestamp: 0,
+      } as unknown as AgentMessage,
+    ];
+    const result = truncateContext(messages, 30);
+    const content = (result[0] as { content: Array<{ type: string; text: string }> }).content;
+    // The large block should be truncated.
+    expect(content[1].text).toContain("[truncated]");
+    expect(content[1].text.length).toBeLessThan(largeText.length);
+    // The small block should be untouched (large block absorbed all excess).
+    expect(content[0].text).toBe(smallText);
+  });
+
+  it("does not mutate the original messages array or its blocks", () => {
+    const longText = "z".repeat(400);
+    const originalBlock = { type: "text" as const, text: longText };
+    const originalMessage = {
+      role: "toolResult" as const,
+      toolCallId: "tc1",
+      toolName: "execute_sql",
+      content: [originalBlock],
+      isError: false,
+      timestamp: 0,
+    } as unknown as AgentMessage;
+    const messages: AgentMessage[] = [originalMessage];
+
+    truncateContext(messages, 10);
+
+    // Original array and message must be untouched.
+    expect(messages[0]).toBe(originalMessage);
+    expect((originalMessage as { content: Array<{ text: string }> }).content[0]).toBe(originalBlock);
+    expect(originalBlock.text).toBe(longText);
+  });
+
+  it("does not modify ToolCall blocks", () => {
+    // A large tool call argument should not be truncated.
+    const largeArg = "q".repeat(400);
+    const messages: AgentMessage[] = [
+      assistantMessage([
+        {
+          type: "toolCall",
+          id: "tc1",
+          name: "execute_sql",
+          arguments: { query: largeArg },
+        },
+      ]),
+    ];
+    // Budget is tiny — but tool calls must not be touched.
+    const result = truncateContext(messages, 1);
+    const block = (result[0] as { content: Array<{ type: string; arguments: Record<string, string> }> }).content[0];
+    expect(block.arguments.query).toBe(largeArg);
+  });
+
+  it("does not modify ImageContent blocks", () => {
+    const messages: AgentMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "image", data: "base64data", mimeType: "image/png" }],
+        timestamp: 0,
+      } as unknown as AgentMessage,
+    ];
+    // Budget is tiny — but image blocks must not be touched.
+    const result = truncateContext(messages, 1);
+    const block = (result[0] as { content: Array<{ type: string; data: string }> }).content[0];
+    expect(block.data).toBe("base64data");
+  });
+
+  it("handles an assistant message with a text block", () => {
+    const longText = "a".repeat(400);
+    const messages: AgentMessage[] = [
+      assistantMessage([{ type: "text", text: longText }]),
+    ];
+    const result = truncateContext(messages, 10);
+    const block = (result[0] as { content: Array<{ type: string; text: string }> }).content[0];
+    expect(block.text).toContain("[truncated]");
+    expect(block.text.length).toBeLessThan(longText.length);
+  });
+
+  it("handles a user message with array content containing a text block", () => {
+    const longText = "b".repeat(400);
+    const messages: AgentMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "text", text: longText }],
+        timestamp: 0,
+      } as unknown as AgentMessage,
+    ];
+    const result = truncateContext(messages, 10);
+    const block = (result[0] as { content: Array<{ type: string; text: string }> }).content[0];
+    expect(block.text).toContain("[truncated]");
+    expect(block.text.length).toBeLessThan(longText.length);
+  });
+
+  it("does not grow the context when a text block is shorter than the truncation suffix", () => {
+    // A 4-char block is 1 token. The truncation suffix "\n[truncated]" is 12 chars.
+    // Without the guard, truncating would replace 4 chars with 12, making things worse.
+    const tinyText = "abcd";
+    const messages: AgentMessage[] = [
+      {
+        role: "toolResult",
+        toolCallId: "tc1",
+        toolName: "execute_sql",
+        content: [{ type: "text", text: tinyText }],
+        isError: false,
+        timestamp: 0,
+      } as unknown as AgentMessage,
+    ];
+    const originalTokens = tinyText.length / 4;
+    // Budget below the block's token count to trigger truncation logic.
+    const result = truncateContext(messages, originalTokens - 0.1);
+    const block = (result[0] as { content: Array<{ type: string; text: string }> }).content[0];
+    // The block must not have grown: the suffix alone is longer than the original.
+    expect(block.text.length).toBeLessThanOrEqual(tinyText.length);
   });
 });

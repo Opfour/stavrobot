@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
-import { Type, getModel, type TextContent, type ImageContent, type AssistantMessage, type ToolCall, complete } from "@mariozechner/pi-ai";
+import { Type, getModel, type TextContent, type ImageContent, type AssistantMessage, type ToolCall, type ThinkingContent, complete } from "@mariozechner/pi-ai";
 import { Agent, type AgentTool, type AgentToolResult, type AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Config } from "./config.js";
 import { isInAllowlist } from "./allowlist.js";
@@ -959,6 +959,162 @@ function wrapToolWithLogging(tool: AgentTool): AgentTool {
   };
 }
 
+// The 4-chars-per-token ratio is a rough approximation for English text.
+// Images use a fixed 1000-token estimate because actual cost depends on
+// resolution, which we don't have at this point.
+function estimateBlockTokens(block: TextContent | ImageContent | ThinkingContent | ToolCall): number {
+  if (block.type === "text") {
+    return block.text.length / 4;
+  }
+  if (block.type === "image") {
+    return 1000;
+  }
+  if (block.type === "thinking") {
+    return block.thinking.length / 4;
+  }
+  return JSON.stringify(block.arguments).length / 4;
+}
+
+function estimateTokens(messages: AgentMessage[]): number {
+  let total = 0;
+  for (const message of messages) {
+    if (message.role === "user") {
+      if (typeof message.content === "string") {
+        total += message.content.length / 4;
+      } else {
+        for (const block of message.content) {
+          total += estimateBlockTokens(block);
+        }
+      }
+    } else if (message.role === "assistant") {
+      for (const block of message.content) {
+        total += estimateBlockTokens(block);
+      }
+    } else if (message.role === "toolResult") {
+      for (const block of message.content) {
+        total += estimateBlockTokens(block);
+      }
+    }
+  }
+  return total;
+}
+
+// Messages and blocks are copied only when modified to avoid mutating the
+// caller's data.
+export function truncateContext(messages: AgentMessage[], tokenBudget: number): AgentMessage[] {
+  if (estimateTokens(messages) <= tokenBudget) {
+    return messages;
+  }
+
+  type TextBlockRef = {
+    messageIndex: number;
+    blockIndex: number;
+    // For user messages with string content, blockIndex is -1.
+    isStringContent: boolean;
+    charCount: number;
+  };
+
+  const textBlocks: TextBlockRef[] = [];
+
+  for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
+    const message = messages[messageIndex];
+    if (message.role === "user") {
+      if (typeof message.content === "string") {
+        textBlocks.push({ messageIndex, blockIndex: -1, isStringContent: true, charCount: message.content.length });
+      } else {
+        for (let blockIndex = 0; blockIndex < message.content.length; blockIndex++) {
+          const block = message.content[blockIndex];
+          if (block.type === "text") {
+            textBlocks.push({ messageIndex, blockIndex, isStringContent: false, charCount: block.text.length });
+          }
+        }
+      }
+    } else if (message.role === "assistant") {
+      for (let blockIndex = 0; blockIndex < message.content.length; blockIndex++) {
+        const block = message.content[blockIndex];
+        if (block.type === "text") {
+          textBlocks.push({ messageIndex, blockIndex, isStringContent: false, charCount: block.text.length });
+        }
+      }
+    } else if (message.role === "toolResult") {
+      for (let blockIndex = 0; blockIndex < message.content.length; blockIndex++) {
+        const block = message.content[blockIndex];
+        if (block.type === "text") {
+          textBlocks.push({ messageIndex, blockIndex, isStringContent: false, charCount: block.text.length });
+        }
+      }
+    }
+  }
+
+  // Largest blocks first: trimming them is most likely to bring us under budget
+  // in a single pass, reducing the number of blocks we need to touch.
+  textBlocks.sort((a, b) => b.charCount - a.charCount);
+
+  const result: AgentMessage[] = [...messages];
+  let currentTokens = estimateTokens(messages);
+
+  for (const ref of textBlocks) {
+    if (currentTokens <= tokenBudget) {
+      break;
+    }
+
+    const excess = currentTokens - tokenBudget;
+    const truncationSuffix = "\n[truncated]";
+    const charsToRemove = Math.ceil(excess * 4) + truncationSuffix.length;
+    const newCharCount = Math.max(0, ref.charCount - charsToRemove);
+
+    // Skip blocks where the suffix alone would make the result longer than the
+    // original, which would increase token usage instead of reducing it.
+    if (newCharCount + truncationSuffix.length >= ref.charCount) {
+      continue;
+    }
+
+    const message = result[ref.messageIndex];
+
+    if (ref.isStringContent && message.role === "user") {
+      const newText = (message.content as string).slice(0, newCharCount) + truncationSuffix;
+      result[ref.messageIndex] = { ...message, content: newText };
+      currentTokens -= (ref.charCount - newText.length) / 4;
+    } else if (!ref.isStringContent) {
+      let contentArray: (TextContent | ImageContent | ThinkingContent | ToolCall)[];
+      if (result[ref.messageIndex] === messages[ref.messageIndex]) {
+        if (message.role === "user" && Array.isArray(message.content)) {
+          contentArray = [...message.content];
+          result[ref.messageIndex] = { ...message, content: contentArray } as AgentMessage;
+        } else if (message.role === "assistant") {
+          contentArray = [...message.content];
+          result[ref.messageIndex] = { ...message, content: contentArray } as AgentMessage;
+        } else if (message.role === "toolResult") {
+          contentArray = [...message.content];
+          result[ref.messageIndex] = { ...message, content: contentArray } as AgentMessage;
+        } else {
+          continue;
+        }
+      } else {
+        const alreadyCopied = result[ref.messageIndex];
+        if (alreadyCopied.role === "user" && Array.isArray(alreadyCopied.content)) {
+          contentArray = alreadyCopied.content as (TextContent | ImageContent)[];
+        } else if (alreadyCopied.role === "assistant") {
+          contentArray = alreadyCopied.content;
+        } else if (alreadyCopied.role === "toolResult") {
+          contentArray = alreadyCopied.content;
+        } else {
+          continue;
+        }
+      }
+
+      const block = contentArray[ref.blockIndex] as TextContent;
+      const newText = block.text.slice(0, newCharCount) + truncationSuffix;
+      contentArray[ref.blockIndex] = { ...block, text: newText };
+      currentTokens -= (ref.charCount - newText.length) / 4;
+    }
+  }
+
+  log.info(`[stavrobot] truncateContext: reduced estimated tokens from ${Math.round(estimateTokens(messages))} to ${Math.round(estimateTokens(result))} (budget: ${tokenBudget})`);
+
+  return result;
+}
+
 export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent> {
   const model = getModel(config.provider as any, config.model as any);
   const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool), createSendSignalMessageTool(pool, config), createManageCronTool(pool), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
@@ -982,6 +1138,8 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
     ? `${config.baseSystemPrompt}\n\n${config.customPrompt}`
     : config.baseSystemPrompt) + buildPromptSuffix(config.publicHostname);
 
+  const tokenBudget = Math.floor(model.contextWindow * 0.8);
+
   const agent = new Agent({
     initialState: {
       systemPrompt: effectiveBasePrompt,
@@ -990,6 +1148,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
       messages: [],
     },
     getApiKey: () => getApiKey(config),
+    transformContext: async (messages) => truncateContext(messages, tokenBudget),
   });
 
   return agent;
