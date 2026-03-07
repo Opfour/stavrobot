@@ -1615,7 +1615,7 @@ export async function handlePrompt(
 
   agent.setSystemPrompt(systemPrompt);
 
-  const savePromises: Promise<void>[] = [];
+  let saveChain: Promise<void> = Promise.resolve();
 
   let resolvedMessage = userMessage;
 
@@ -1689,9 +1689,9 @@ export async function handlePrompt(
         // external sender.
         if (message.role === "user" && !firstUserMessageSaved) {
           firstUserMessageSaved = true;
-          savePromises.push(saveMessage(pool, message, agentId, senderIdentityId, senderAgentId));
+          saveChain = saveChain.then(() => saveMessage(pool, message, agentId, senderIdentityId, senderAgentId));
         } else {
-          savePromises.push(saveMessage(pool, message, agentId));
+          saveChain = saveChain.then(() => saveMessage(pool, message, agentId));
         }
       }
     }
@@ -1709,7 +1709,7 @@ export async function handlePrompt(
       agent.setTools(fullTools);
     }
     unsubscribe();
-    await Promise.all(savePromises);
+    await saveChain;
   }
 
   if (agent.state.error) {
