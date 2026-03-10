@@ -37,10 +37,6 @@ export interface OwnerConfig {
   whatsapp?: string;
 }
 
-export interface ExperimentsConfig {
-  nightlyReview?: boolean;
-}
-
 export interface Config {
   provider: string;
   model: string;
@@ -57,7 +53,6 @@ export interface Config {
   telegram?: TelegramConfig;
   whatsapp?: WhatsappConfig;
   owner: OwnerConfig;
-  experiments?: ExperimentsConfig;
 }
 
 export function loadConfig(): Config {

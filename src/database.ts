@@ -588,12 +588,7 @@ const NIGHTLY_CHECKUP_CRON_PATH = "prompts/nightly-checkup-cron.txt";
 const NIGHTLY_REVIEW_MARKER = "[nightly-review]";
 const NIGHTLY_REVIEW_CRON_EXPRESSION = "0 3 * * *";
 
-export async function seedNightlyReview(pool: pg.Pool, enabled: boolean): Promise<void> {
-  if (!enabled) {
-    log.info("[stavrobot] Nightly review experiment is disabled, skipping seed.");
-    return;
-  }
-
+export async function seedNightlyReview(pool: pg.Pool): Promise<void> {
   let promptText: string;
   try {
     promptText = fs.readFileSync(NIGHTLY_CHECKUP_CRON_PATH, "utf-8").trimEnd();

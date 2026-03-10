@@ -428,7 +428,7 @@ async function main(): Promise<void> {
   await initializeMemoriesSchema(pool);
   await initializeCompactionsSchema(pool);
   await initializeCronSchema(pool);
-  await seedNightlyReview(pool, config.experiments?.nightlyReview === true);
+  await seedNightlyReview(pool);
   await initializePagesSchema(pool);
   await initializeScratchpadSchema(pool);
   await initializeAgentsSchema(pool);
