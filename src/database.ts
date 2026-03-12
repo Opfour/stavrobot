@@ -471,6 +471,45 @@ export async function resolveInterlocutor(
   service: string,
   identifier: string,
 ): Promise<InterlocutorInfo | null> {
+  if (service === "email") {
+    const atIndex = identifier.lastIndexOf("@");
+    const domain = atIndex !== -1 ? identifier.slice(atIndex + 1) : identifier;
+    // LIKE treats % and _ as wildcards in the pattern. The domain is parameterized
+    // (no SQL injection risk), but an unescaped % or _ in the domain would widen
+    // the match beyond the intended exact-domain filter.
+    const safeDomain = domain.replace(/%/g, "\\%").replace(/_/g, "\\_");
+    const result = await pool.query<{
+      interlocutor_id: number;
+      identity_id: number;
+      agent_id: number | null;
+      display_name: string;
+      identifier: string;
+    }>(
+      `SELECT i.id AS interlocutor_id, ii.id AS identity_id, i.agent_id,
+              i.display_name, ii.identifier
+       FROM interlocutor_identities ii
+       JOIN interlocutors i ON i.id = ii.interlocutor_id
+       WHERE ii.service = 'email' AND i.enabled = true
+         AND ii.identifier LIKE '%@' || $1`,
+      [safeDomain],
+    );
+    const matchedRow = result.rows.find((row) => matchesEmailEntry(identifier, row.identifier));
+    if (matchedRow === undefined) {
+      return null;
+    }
+    // Interlocutors with no assigned agent have their messages dropped by the queue.
+    if (matchedRow.agent_id === null) {
+      return null;
+    }
+    return {
+      interlocutorId: matchedRow.interlocutor_id,
+      identityId: matchedRow.identity_id,
+      agentId: matchedRow.agent_id,
+      isOwner: matchedRow.interlocutor_id === getOwnerInterlocutorId(),
+      displayName: matchedRow.display_name,
+    };
+  }
+
   const result = await pool.query<{
     interlocutor_id: number;
     identity_id: number;

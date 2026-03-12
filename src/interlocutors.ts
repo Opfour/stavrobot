@@ -15,8 +15,8 @@ create — Create a new interlocutor.
   display_name (required): Human-readable name. Must be unique.
   agent_id (optional): ID of the agent that handles inbound messages from this interlocutor. If not set, inbound messages are dropped.
   enabled (optional): Boolean. Whether the interlocutor is enabled. Defaults to true.
-  service (optional): Channel name, e.g. "signal" or "telegram".
-  identifier (optional): Channel-native ID, e.g. phone number or Telegram chat ID.
+  service (optional): Channel name, e.g. "signal", "telegram", or "email".
+  identifier (optional): Channel-native ID, e.g. phone number, Telegram chat ID, or email address.
   If service and identifier are provided, the identity is created along with the interlocutor.
   Both must be present or both absent.
   Returns the created interlocutor record.
@@ -32,8 +32,8 @@ delete — Remove all channel identities from an interlocutor (the interlocutor 
 
 add_identity — Add a channel identity to an existing interlocutor. Refuses to modify the owner's identities (those are managed by the config file).
   id (required): Interlocutor ID.
-  service (required): Channel name, e.g. "signal" or "telegram".
-  identifier (required): Channel-native ID, e.g. phone number or Telegram chat ID.
+  service (required): Channel name, e.g. "signal", "telegram", or "email".
+  identifier (required): Channel-native ID, e.g. phone number, Telegram chat ID, or email address.
 
 remove_identity — Soft-delete a channel identity (nulls out the identifier, keeps the row). Refuses to modify the owner's identities.
   id (required): Interlocutor ID.
@@ -57,7 +57,7 @@ To talk to another person to complete some task:
 
 The agent_id determines which agent handles inbound messages from this interlocutor. If agent_id is null or the interlocutor is disabled, inbound messages are dropped.
 
-Messaging service allowlists: Creating an interlocutor with a channel identity is NOT enough to allow an agent to message that person. Each messaging service (Signal, Telegram, etc.) has its own allowlist/whitelist that must be configured by Stavros manually. If an agent gets "not in allowlist" errors when trying to send a message, ask Stavros to add the identifier (phone number, chat ID, etc.) to the relevant service's whitelist.`;
+Messaging service allowlists: Creating an interlocutor with a channel identity is NOT enough to allow an agent to message that person. Each messaging service (Signal, Telegram, email, etc.) has its own allowlist/whitelist that must be configured by Stavros manually. If an agent gets "not in allowlist" errors when trying to send a message, ask Stavros to add the identifier (phone number, chat ID, email address, etc.) to the relevant service's whitelist. The email allowlist supports glob wildcards: *@example.com allows any address at that domain, and user+*@gmail.com allows any plus-tag for that user.`;
 
 interface InterlocutorRecord {
   id: number;
