@@ -6,12 +6,13 @@ export interface Allowlist {
   signal: string[];
   telegram: (number | string)[];
   whatsapp: string[];
+  email: string[];
   notes: Record<string, string>;
 }
 
 const ALLOWLIST_PATH = process.env.ALLOWLIST_PATH ?? "allowlist.json";
 
-let currentAllowlist: Allowlist = { signal: [], telegram: [], whatsapp: [], notes: {} };
+let currentAllowlist: Allowlist = { signal: [], telegram: [], whatsapp: [], email: [], notes: {} };
 
 function validateAllowlist(value: unknown): Allowlist {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -33,6 +34,11 @@ function validateAllowlist(value: unknown): Allowlist {
   if (!Array.isArray(whatsapp) || !whatsapp.every((item) => typeof item === "string")) {
     throw new Error("allowlist.json: 'whatsapp' must be an array of strings");
   }
+  // The email field is optional for the same backward-compat reason as whatsapp.
+  const email = obj.email ?? [];
+  if (!Array.isArray(email) || !email.every((item) => typeof item === "string")) {
+    throw new Error("allowlist.json: 'email' must be an array of strings");
+  }
   // The notes field is optional for the same backward-compat reason as whatsapp.
   const notes = obj.notes ?? {};
   if (typeof notes !== "object" || notes === null || Array.isArray(notes)) {
@@ -46,6 +52,7 @@ function validateAllowlist(value: unknown): Allowlist {
     signal: obj.signal as string[],
     telegram: obj.telegram as (number | string)[],
     whatsapp: whatsapp as string[],
+    email: email as string[],
     notes: notesObj as Record<string, string>,
   };
 }
@@ -67,7 +74,7 @@ export function loadAllowlist(config: Config): Allowlist {
       );
     }
 
-    currentAllowlist = { signal: migratedSignal, telegram: migratedTelegram, whatsapp: [], notes: {} };
+    currentAllowlist = { signal: migratedSignal, telegram: migratedTelegram, whatsapp: [], email: [], notes: {} };
     saveAllowlist(currentAllowlist);
   }
 
@@ -94,6 +101,14 @@ export function loadAllowlist(config: Config): Allowlist {
     changed = true;
   }
 
+  if (config.owner.email !== undefined) {
+    const ownerEmail = config.owner.email.toLowerCase();
+    if (!currentAllowlist.email.includes(ownerEmail)) {
+      currentAllowlist.email.push(ownerEmail);
+      changed = true;
+    }
+  }
+
   if (changed) {
     saveAllowlist(currentAllowlist);
   }
@@ -111,6 +126,7 @@ export function getAllowlist(): Allowlist {
     signal: [...currentAllowlist.signal],
     telegram: [...currentAllowlist.telegram],
     whatsapp: [...currentAllowlist.whatsapp],
+    email: [...currentAllowlist.email],
     notes: { ...currentAllowlist.notes },
   };
 }
@@ -138,10 +154,16 @@ export function isInAllowlist(service: string, identifier: string): boolean {
     }
     return currentAllowlist.whatsapp.includes(identifier);
   }
+  if (service === "email") {
+    if (currentAllowlist.email.includes("*")) {
+      return true;
+    }
+    return currentAllowlist.email.includes(identifier.toLowerCase());
+  }
   return false;
 }
 
-export function getOwnerIdentities(config: Config): { signal: string[]; telegram: number[]; whatsapp: string[] } {
+export function getOwnerIdentities(config: Config): { signal: string[]; telegram: number[]; whatsapp: string[]; email: string[] } {
   const signal = config.owner.signal !== undefined ? [config.owner.signal] : [];
   let telegram: number[] = [];
   if (config.owner.telegram !== undefined) {
@@ -151,5 +173,6 @@ export function getOwnerIdentities(config: Config): { signal: string[]; telegram
     }
   }
   const whatsapp = config.owner.whatsapp !== undefined ? [config.owner.whatsapp] : [];
-  return { signal, telegram, whatsapp };
+  const email = config.owner.email !== undefined ? [config.owner.email.toLowerCase()] : [];
+  return { signal, telegram, whatsapp, email };
 }

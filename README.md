@@ -2,13 +2,13 @@
 
 ![](misc/stavrobot.jpg)
 
-A personal AI assistant with persistent memory, sandboxed code execution, and Signal, Telegram, and WhatsApp integration.
+A personal AI assistant with persistent memory, sandboxed code execution, and Signal, Telegram, WhatsApp, and email integration.
 
 ## Features
 
 - **Secure.** Everything runs in a container, your host OS is completely invisible to the AI. The AI doesn't see any secrets unless you want it to.
 - **Light.** Doesn't run one container per component. Plugins all run in a single container, separated by Unix permissions.
-- **Signal/Telegram/WhatsApp integration.** Two-way messaging, with formatting, attachments, etc.
+- **Signal/Telegram/WhatsApp/Email integration.** Two-way messaging, with formatting, attachments, etc.
 - **Three-tier knowledge.** Remembers everything without blowing out its context.  Intelligently and transparently retrieves data from its memory.
 - **Low token usage.** Various optimizations have been made to be light on token usage. It even uses [TOON](https://github.com/toon-format/toon) internally.
 - **Plugins.** Install plugins and extend Stavrobot's capabilities by just giving it a git repo URL. Plugins are isolated from each other — each runs as a dedicated system user with no access to other plugins' files or configuration.
@@ -85,6 +85,16 @@ WhatsApp uses [Baileys](https://github.com/WhiskeySockets/Baileys), an unofficia
 5. The session persists across restarts in `./data/whatsapp`.
 6. Add allowed phone numbers via the `/settings` web UI.
 
+### Email setup
+
+Email uses a Cloudflare Email Worker for inbound delivery and SMTP for outbound. See
+`config.example.toml` for the complete worker code and detailed setup instructions.
+
+1. Add an `[email]` section to your `config.toml` with SMTP credentials and a random `webhookSecret`.
+2. Deploy the Cloudflare Email Worker (code in `config.example.toml`) and set the `WEBHOOK_URL` and `WEBHOOK_SECRET` environment variables on the worker.
+3. In Cloudflare Email Routing, add a rule to forward inbound mail to the worker.
+4. Add allowed sender addresses via the `/settings` web UI.
+
 ### Running
 
 ```bash
@@ -139,7 +149,7 @@ tell it explicitly what information to put where.
 
 ## Talking to other people
 
-Stavrobot can message people on your behalf over Signal, Telegram, or WhatsApp. Need to schedule a
+Stavrobot can message people on your behalf over Signal, Telegram, WhatsApp, or email. Need to schedule a
 dinner with a friend? Tell the bot to find a time that works for both of you, and it
 will message them, negotiate a date, and put it on your calendar. Want to arrange an
 appointment, coordinate a group outing, or ask someone a question while you're busy?
@@ -207,7 +217,7 @@ https://github.com/orgs/stavrobot/repositories
 
 ## Architecture
 
-Four Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3000, handles Telegram webhooks at `POST /telegram/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed), and `coder` (Claude Code headless agent for creating and modifying editable plugins). The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
+Four Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3000, handles Telegram webhooks at `POST /telegram/webhook`, handles inbound email webhooks at `POST /email/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed), and `coder` (Claude Code headless agent for creating and modifying editable plugins). The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
 
 ## License
 

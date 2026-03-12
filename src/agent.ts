@@ -25,6 +25,7 @@ import { sendSignalMessage } from "./signal.js";
 import { sendTelegramMessage } from "./telegram-api.js";
 import { internalFetch } from "./internal-fetch.js";
 import { getWhatsappSocket, e164ToJid, sendWhatsappTextMessage } from "./whatsapp-api.js";
+import { sendEmail } from "./email-api.js";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 import { log } from "./log.js";
 export { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
@@ -787,6 +788,124 @@ export function createSendWhatsappMessageTool(pool: pg.Pool, config: Config): Ag
   };
 }
 
+export function createSendEmailTool(pool: pg.Pool, config: Config): AgentTool {
+  return {
+    name: "send_email",
+    label: "Send email",
+    description: "Send an email to a display name or email address. Sends plain text only.",
+    parameters: Type.Object({
+      recipient: Type.String({ description: "Display name of the recipient (e.g., \"Mom\") or email address (e.g., \"mom@example.com\")." }),
+      subject: Type.String({ description: "Email subject line." }),
+      message: Type.String({ description: "The email body (plain text)." }),
+      attachmentPath: Type.Optional(Type.String({ description: "File path to an attachment under the temp directory (e.g., from manage_files write or a plugin tool)." })),
+    }),
+    execute: async (
+      toolCallId: string,
+      params: unknown
+    ): Promise<AgentToolResult<{ message: string }>> => {
+      const raw = params as {
+        recipient: string;
+        subject: string;
+        message: string;
+        attachmentPath?: string;
+      };
+
+      const recipientInput = raw.recipient;
+      const subject = raw.subject.trim();
+      const message = raw.message.trim();
+      const attachmentPath = raw.attachmentPath?.trim() || undefined;
+
+      // Resolve display name to email address, falling back to treating the input as a raw email address.
+      const resolved = await resolveRecipient(pool, recipientInput, "email");
+      let recipient: string;
+      if (resolved !== null && !("disabled" in resolved)) {
+        recipient = resolved.identifier;
+      } else if (resolved !== null && "disabled" in resolved) {
+        const errorMessage = `Error: Interlocutor "${resolved.displayName}" is disabled.`;
+        log.warn("[stavrobot] send_email rejected:", errorMessage);
+        return {
+          content: [{ type: "text" as const, text: errorMessage }],
+          details: { message: errorMessage },
+        };
+      } else {
+        // If the input matches an interlocutor by name but they have no email identity,
+        // give a specific error rather than falling through to the raw-ID path.
+        const interlocutor = await resolveInterlocutorByName(pool, recipientInput);
+        if (interlocutor !== null) {
+          const errorMessage = `Error: interlocutor '${recipientInput}' has no email identity. Use manage_interlocutors to add one.`;
+          log.warn("[stavrobot] send_email rejected:", errorMessage);
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+        // Soft gate: raw ID must exist in interlocutor_identities for an enabled interlocutor.
+        const normalizedInput = recipientInput.toLowerCase();
+        const identityCheck = await pool.query<{ identifier: string }>(
+          "SELECT ii.identifier FROM interlocutor_identities ii JOIN interlocutors i ON i.id = ii.interlocutor_id WHERE ii.service = 'email' AND ii.identifier = $1 AND i.enabled = true",
+          [normalizedInput],
+        );
+        if (identityCheck.rows.length === 0) {
+          const errorMessage = `Error: unknown recipient '${recipientInput}'. No interlocutor found with that display name or email address.`;
+          log.warn("[stavrobot] send_email rejected:", errorMessage);
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+        recipient = normalizedInput;
+      }
+
+      // Normalize to lowercase before the allowlist check.
+      recipient = recipient.toLowerCase();
+
+      // Hard gate: recipient must be in the allowlist.
+      if (!isInAllowlist("email", recipient)) {
+        const errorMessage = `Error: recipient '${recipient}' is not in the email allowlist.`;
+        log.warn("[stavrobot] send_email rejected:", errorMessage);
+        return {
+          content: [{ type: "text" as const, text: errorMessage }],
+          details: { message: errorMessage },
+        };
+      }
+
+      const emailPreview = message.slice(0, 200);
+      log.info(`[stavrobot] message out: email - ${recipient} - ${emailPreview}`);
+
+      if (attachmentPath !== undefined) {
+        const resolvedAttachmentPath = path.resolve(attachmentPath);
+        if (!resolvedAttachmentPath.startsWith(TEMP_ATTACHMENTS_DIR)) {
+          return {
+            content: [{ type: "text" as const, text: "Error: attachmentPath must be under the temporary attachments directory." }],
+            details: { message: "Error: attachmentPath must be under the temporary attachments directory." },
+          };
+        }
+
+        await sendEmail(recipient, subject, message, [
+          { filename: path.basename(resolvedAttachmentPath), path: resolvedAttachmentPath },
+        ]);
+
+        // The path check above guarantees this is a temp file, so always delete it.
+        await fs.unlink(resolvedAttachmentPath);
+
+        const successMessage = "Email sent successfully.";
+        return {
+          content: [{ type: "text" as const, text: successMessage }],
+          details: { message: successMessage },
+        };
+      }
+
+      await sendEmail(recipient, subject, message);
+
+      const successMessage = "Email sent successfully.";
+      return {
+        content: [{ type: "text" as const, text: successMessage }],
+        details: { message: successMessage },
+      };
+    },
+  };
+}
+
 const MANAGE_CRON_HELP_TEXT = `manage_cron: create, update, delete, or list scheduled cron entries.
 
 Actions:
@@ -1133,6 +1252,9 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
   }
   if (config.whatsapp !== undefined) {
     tools.push(createSendWhatsappMessageTool(pool, config));
+  }
+  if (config.email !== undefined && config.email.smtpHost !== undefined) {
+    tools.push(createSendEmailTool(pool, config));
   }
 
   const effectiveBasePrompt = (config.customPrompt !== undefined

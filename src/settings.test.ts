@@ -77,8 +77,8 @@ beforeEach(() => {
 
 describe("handleGetAllowlistRequest", () => {
   it("returns 200 with allowlist and ownerIdentities", () => {
-    mockGetAllowlist.mockReturnValue({ signal: ["+1111111111"], telegram: [42], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: ["+1111111111"], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: ["+1111111111"], telegram: [42], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: ["+1111111111"], telegram: [], whatsapp: [], email: [] });
 
     const response = makeMockResponse();
     const config = makeConfig({ owner: { name: "Owner", signal: "+1111111111" } });
@@ -94,8 +94,8 @@ describe("handleGetAllowlistRequest", () => {
   });
 
   it("calls getOwnerIdentities with the config", () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
 
     const response = makeMockResponse();
     const config = makeConfig();
@@ -106,8 +106,8 @@ describe("handleGetAllowlistRequest", () => {
   });
 
   it("includes notes in the response", () => {
-    mockGetAllowlist.mockReturnValue({ signal: ["+1111111111"], telegram: [], whatsapp: [], notes: { "+1111111111": "Mom" } });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: ["+1111111111"], telegram: [], whatsapp: [], email: [], notes: { "+1111111111": "Mom" } });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
 
     const response = makeMockResponse();
     handleGetAllowlistRequest(response as unknown as http.ServerResponse, makeConfig());
@@ -119,11 +119,11 @@ describe("handleGetAllowlistRequest", () => {
 
 describe("handlePutAllowlistRequest", () => {
   it("saves the allowlist and returns 200 with updated data", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const body = JSON.stringify({ signal: ["+2222222222"], telegram: [99], whatsapp: [] });
+    const body = JSON.stringify({ signal: ["+2222222222"], telegram: [99], whatsapp: [], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
     const config = makeConfig();
@@ -131,7 +131,7 @@ describe("handlePutAllowlistRequest", () => {
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, config);
 
     expect(response.statusCode).toBe(200);
-    expect(mockSaveAllowlist).toHaveBeenCalledWith({ signal: ["+2222222222"], telegram: [99], whatsapp: [], notes: {} });
+    expect(mockSaveAllowlist).toHaveBeenCalledWith({ signal: ["+2222222222"], telegram: [99], whatsapp: [], email: [], notes: {} });
     const parsed = JSON.parse(response.body!);
     expect(parsed.allowlist.signal).toEqual(["+2222222222"]);
     expect(parsed.allowlist.telegram).toEqual([99]);
@@ -160,7 +160,7 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when signal is not an array of strings", async () => {
-    const request = makeMockRequest(JSON.stringify({ signal: [123], telegram: [], whatsapp: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: [123], telegram: [], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -171,7 +171,7 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when signal contains empty strings", async () => {
-    const request = makeMockRequest(JSON.stringify({ signal: [""], telegram: [], whatsapp: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: [""], telegram: [], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -182,7 +182,7 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when telegram is not an array of integers", async () => {
-    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [42.5], whatsapp: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [42.5], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -193,7 +193,7 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when telegram contains strings instead of numbers", async () => {
-    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: ["42"], whatsapp: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: ["42"], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -204,12 +204,12 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("re-adds missing owner signal identity before saving", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: ["+9999999999"], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: ["+9999999999"], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
     // Submit without the owner's number.
-    const body = JSON.stringify({ signal: ["+1111111111"], telegram: [], whatsapp: [] });
+    const body = JSON.stringify({ signal: ["+1111111111"], telegram: [], whatsapp: [], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -222,12 +222,12 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("re-adds missing owner telegram identity before saving", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [12345], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [12345], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
     // Submit without the owner's chat ID.
-    const body = JSON.stringify({ signal: [], telegram: [99], whatsapp: [] });
+    const body = JSON.stringify({ signal: [], telegram: [99], whatsapp: [], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -240,11 +240,11 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("does not duplicate owner identity when already present in submitted list", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: ["+9999999999"], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: ["+9999999999"], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const body = JSON.stringify({ signal: ["+9999999999", "+1111111111"], telegram: [], whatsapp: [] });
+    const body = JSON.stringify({ signal: ["+9999999999", "+1111111111"], telegram: [], whatsapp: [], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -255,11 +255,11 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns ownerIdentities in the response", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: ["+9999999999"], telegram: [12345], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: ["+9999999999"], telegram: [12345], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const body = JSON.stringify({ signal: ["+9999999999"], telegram: [12345], whatsapp: [] });
+    const body = JSON.stringify({ signal: ["+9999999999"], telegram: [12345], whatsapp: [], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -271,9 +271,9 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when signal contains a non-E.164 number", async () => {
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
 
-    const request = makeMockRequest(JSON.stringify({ signal: ["banana"], telegram: [], whatsapp: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: ["banana"], telegram: [], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -285,9 +285,9 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when signal number is missing the leading plus sign", async () => {
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
 
-    const request = makeMockRequest(JSON.stringify({ signal: ["12345678901"], telegram: [], whatsapp: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: ["12345678901"], telegram: [], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -298,9 +298,9 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when signal contains whitespace-only strings", async () => {
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
 
-    const request = makeMockRequest(JSON.stringify({ signal: ["   "], telegram: [], whatsapp: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: ["   "], telegram: [], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -311,11 +311,11 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("trims signal entries before saving", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const request = makeMockRequest(JSON.stringify({ signal: ["  +1111111111  "], telegram: [], whatsapp: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: ["  +1111111111  "], telegram: [], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -326,12 +326,12 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("deduplicates signal entries before saving", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
     const request = makeMockRequest(
-      JSON.stringify({ signal: ["+1111111111", "+2222222222", "+1111111111"], telegram: [], whatsapp: [] }),
+      JSON.stringify({ signal: ["+1111111111", "+2222222222", "+1111111111"], telegram: [], whatsapp: [], email: [] }),
     );
     const response = makeMockResponse();
 
@@ -343,11 +343,11 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("deduplicates telegram entries before saving", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [42, 99, 42], whatsapp: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [42, 99, 42], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -358,24 +358,24 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("saves whatsapp entries and returns them in the response", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: ["+3333333333"] });
+    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: ["+3333333333"], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
 
     expect(response.statusCode).toBe(200);
-    expect(mockSaveAllowlist).toHaveBeenCalledWith({ signal: [], telegram: [], whatsapp: ["+3333333333"], notes: {} });
+    expect(mockSaveAllowlist).toHaveBeenCalledWith({ signal: [], telegram: [], whatsapp: ["+3333333333"], email: [], notes: {} });
     const parsed = JSON.parse(response.body!);
     expect(parsed.allowlist.whatsapp).toEqual(["+3333333333"]);
   });
 
   it("returns 400 when whatsapp is not an array of strings", async () => {
-    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [], whatsapp: [123] }));
+    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [], whatsapp: [123], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -386,7 +386,7 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when whatsapp contains a non-E.164 number", async () => {
-    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [], whatsapp: ["notanumber"] }));
+    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [], whatsapp: ["notanumber"], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -398,12 +398,12 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("deduplicates whatsapp entries before saving", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
     const request = makeMockRequest(
-      JSON.stringify({ signal: [], telegram: [], whatsapp: ["+1111111111", "+2222222222", "+1111111111"] }),
+      JSON.stringify({ signal: [], telegram: [], whatsapp: ["+1111111111", "+2222222222", "+1111111111"], email: [] }),
     );
     const response = makeMockResponse();
 
@@ -415,12 +415,12 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("re-adds missing owner whatsapp identity before saving", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: ["+8888888888"] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: ["+8888888888"], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
     // Submit without the owner's WhatsApp number.
-    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: ["+1111111111"] });
+    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: ["+1111111111"], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -433,11 +433,11 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("accepts '*' as a valid signal entry and saves it", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const body = JSON.stringify({ signal: ["*"], telegram: [], whatsapp: [] });
+    const body = JSON.stringify({ signal: ["*"], telegram: [], whatsapp: [], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -449,11 +449,11 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("accepts '*' as a valid telegram entry and saves it", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const body = JSON.stringify({ signal: [], telegram: ["*"], whatsapp: [] });
+    const body = JSON.stringify({ signal: [], telegram: ["*"], whatsapp: [], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -465,11 +465,11 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("accepts '*' as a valid whatsapp entry and saves it", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: ["*"] });
+    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: ["*"], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -481,7 +481,7 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when telegram contains a non-integer string other than '*'", async () => {
-    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: ["notanumber"], whatsapp: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: ["notanumber"], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
@@ -492,11 +492,11 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("saves notes when provided and returns them in the response", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const body = JSON.stringify({ signal: ["+1111111111"], telegram: [], whatsapp: [], notes: { "+1111111111": "Mom" } });
+    const body = JSON.stringify({ signal: ["+1111111111"], telegram: [], whatsapp: [], email: [], notes: { "+1111111111": "Mom" } });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -510,11 +510,11 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("defaults notes to {} when absent from request body", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const body = JSON.stringify({ signal: ["+1111111111"], telegram: [], whatsapp: [] });
+    const body = JSON.stringify({ signal: ["+1111111111"], telegram: [], whatsapp: [], email: [] });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -526,14 +526,15 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("prunes orphaned notes whose keys are not in any service list", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
     const body = JSON.stringify({
       signal: ["+1111111111"],
       telegram: [],
       whatsapp: [],
+      email: [],
       notes: { "+1111111111": "Mom", "+9999999999": "Orphan" },
     });
     const request = makeMockRequest(body);
@@ -548,14 +549,15 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("keeps telegram notes using string keys", async () => {
-    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], notes: {} });
-    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [] });
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
     mockSaveAllowlist.mockImplementation(() => undefined);
 
     const body = JSON.stringify({
       signal: [],
       telegram: [123456789],
       whatsapp: [],
+      email: [],
       notes: { "123456789": "Work group" },
     });
     const request = makeMockRequest(body);
@@ -569,7 +571,7 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when notes is not a plain object", async () => {
-    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: [], notes: "not-an-object" });
+    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: [], email: [], notes: "not-an-object" });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -581,7 +583,7 @@ describe("handlePutAllowlistRequest", () => {
   });
 
   it("returns 400 when notes contains non-string values", async () => {
-    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: [], notes: { "+1111111111": 42 } });
+    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: [], email: [], notes: { "+1111111111": 42 } });
     const request = makeMockRequest(body);
     const response = makeMockResponse();
 
@@ -590,6 +592,154 @@ describe("handlePutAllowlistRequest", () => {
     expect(response.statusCode).toBe(400);
     const parsed = JSON.parse(response.body!);
     expect(parsed.error).toMatch(/notes/i);
+  });
+  it("saves email entries and returns them in the response", async () => {
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
+    mockSaveAllowlist.mockImplementation(() => undefined);
+
+    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: [], email: ["user@example.com"] });
+    const request = makeMockRequest(body);
+    const response = makeMockResponse();
+
+    await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(200);
+    expect(mockSaveAllowlist).toHaveBeenCalledWith({ signal: [], telegram: [], whatsapp: [], email: ["user@example.com"], notes: {} });
+    const parsed = JSON.parse(response.body!);
+    expect(parsed.allowlist.email).toEqual(["user@example.com"]);
+  });
+
+  it("returns 400 when email is not an array of strings", async () => {
+    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [], whatsapp: [], email: [123] }));
+    const response = makeMockResponse();
+
+    await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(400);
+    const parsed = JSON.parse(response.body!);
+    expect(parsed.error).toMatch(/email/i);
+  });
+
+  it("returns 400 when email contains empty strings", async () => {
+    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [], whatsapp: [], email: [""] }));
+    const response = makeMockResponse();
+
+    await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(400);
+    const parsed = JSON.parse(response.body!);
+    expect(parsed.error).toMatch(/email/i);
+  });
+
+  it("returns 400 when email contains an invalid address", async () => {
+    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [], whatsapp: [], email: ["notanemail"] }));
+    const response = makeMockResponse();
+
+    await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(400);
+    const parsed = JSON.parse(response.body!);
+    expect(parsed.error).toMatch(/notanemail/);
+  });
+
+  it("returns 400 when email is missing from the request body", async () => {
+    const request = makeMockRequest(JSON.stringify({ signal: [], telegram: [], whatsapp: [] }));
+    const response = makeMockResponse();
+
+    await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(400);
+    const parsed = JSON.parse(response.body!);
+    expect(parsed.error).toMatch(/email/i);
+  });
+
+  it("normalizes email addresses to lowercase before saving", async () => {
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
+    mockSaveAllowlist.mockImplementation(() => undefined);
+
+    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: [], email: ["User@Example.COM"] });
+    const request = makeMockRequest(body);
+    const response = makeMockResponse();
+
+    await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(200);
+    const saved = mockSaveAllowlist.mock.calls[0][0];
+    expect(saved.email).toEqual(["user@example.com"]);
+  });
+
+  it("deduplicates email entries before saving", async () => {
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
+    mockSaveAllowlist.mockImplementation(() => undefined);
+
+    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: [], email: ["a@b.com", "c@d.com", "a@b.com"] });
+    const request = makeMockRequest(body);
+    const response = makeMockResponse();
+
+    await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(200);
+    const saved = mockSaveAllowlist.mock.calls[0][0];
+    expect(saved.email).toEqual(["a@b.com", "c@d.com"]);
+  });
+
+  it("accepts '*' as a valid email entry and saves it", async () => {
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
+    mockSaveAllowlist.mockImplementation(() => undefined);
+
+    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: [], email: ["*"] });
+    const request = makeMockRequest(body);
+    const response = makeMockResponse();
+
+    await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(200);
+    const saved = mockSaveAllowlist.mock.calls[0][0];
+    expect(saved.email).toContain("*");
+  });
+
+  it("re-adds missing owner email identity before saving", async () => {
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: ["owner@example.com"] });
+    mockSaveAllowlist.mockImplementation(() => undefined);
+
+    // Submit without the owner's email.
+    const body = JSON.stringify({ signal: [], telegram: [], whatsapp: [], email: ["other@example.com"] });
+    const request = makeMockRequest(body);
+    const response = makeMockResponse();
+
+    await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(200);
+    const saved = mockSaveAllowlist.mock.calls[0][0];
+    expect(saved.email).toContain("owner@example.com");
+    expect(saved.email).toContain("other@example.com");
+  });
+
+  it("includes email entries in allEntryKeys so email notes are not pruned", async () => {
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
+    mockSaveAllowlist.mockImplementation(() => undefined);
+
+    const body = JSON.stringify({
+      signal: [],
+      telegram: [],
+      whatsapp: [],
+      email: ["user@example.com"],
+      notes: { "user@example.com": "Work contact" },
+    });
+    const request = makeMockRequest(body);
+    const response = makeMockResponse();
+
+    await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(200);
+    const saved = mockSaveAllowlist.mock.calls[0][0];
+    expect(saved.notes).toEqual({ "user@example.com": "Work contact" });
   });
 });
 
@@ -611,7 +761,7 @@ describe("serveAllowlistPage", () => {
     expect(response.body).toContain("<h1>Settings</h1>");
   });
 
-  it("returns HTML containing the Signal, Telegram, and WhatsApp sections", () => {
+  it("returns HTML containing the Signal, Telegram, WhatsApp, and Email sections", () => {
     const response = makeMockResponse();
 
     serveAllowlistPage(response as unknown as http.ServerResponse);
@@ -619,5 +769,6 @@ describe("serveAllowlistPage", () => {
     expect(response.body).toContain("Signal allowlist");
     expect(response.body).toContain("Telegram allowlist");
     expect(response.body).toContain("WhatsApp allowlist");
+    expect(response.body).toContain("Email allowlist");
   });
 });

@@ -27,14 +27,15 @@ too formal.
 """
 
 # The owner of this bot. Used to seed the owner interlocutor record on startup.
-# name is required. signal, telegram, and whatsapp are the owner's personal
-# numbers/IDs — the ones the owner messages the bot from (not the bot's own
-# numbers). Include whichever channels the owner uses.
+# name is required. signal, telegram, whatsapp, and email are the owner's personal
+# numbers/IDs/addresses — the ones the owner messages the bot from (not the bot's
+# own numbers). Include whichever channels the owner uses.
 [owner]
 name = "Stavros"
 # signal = "+1234567890"
 # telegram = "123456789"
 # whatsapp = "+1234567890"
+# email = "owner@example.com"
 
 # Signal integration. account is the bot's phone number (registered with
 # signal-cli — must be a separate number from the owner's).
@@ -59,6 +60,55 @@ botToken = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 # The allowlist of numbers permitted to message the agent is managed via the
 # /settings web UI and stored in allowlist.json (not in this file).
 # [whatsapp]
+
+# Email integration. Inbound email arrives via a Cloudflare Email Worker that
+# posts to /email/webhook. Outbound email is sent via SMTP.
+#
+# Setup:
+#   1. Add this section to config.toml with your SMTP credentials and a random
+#      webhookSecret (e.g. `openssl rand -hex 32`).
+#   2. Deploy the Cloudflare Email Worker below to your Cloudflare account.
+#   3. In the worker, set the environment variables WEBHOOK_URL and WEBHOOK_SECRET
+#      (via `wrangler secret put` or the Cloudflare dashboard):
+#        WEBHOOK_URL    = https://<publicHostname>/email/webhook
+#        WEBHOOK_SECRET = <the same value as webhookSecret below>
+#   4. In Cloudflare Email Routing, add a routing rule that forwards inbound mail
+#      to the worker.
+#   5. Add allowed sender addresses via the /settings web UI.
+#
+# Cloudflare Email Worker code (create a new Worker and paste this):
+#
+#   export default {
+#     async email(message, env, ctx) {
+#       const rawEmail = await new Response(message.raw).text();
+#       const response = await fetch(env.WEBHOOK_URL, {
+#         method: "POST",
+#         headers: {
+#           "Content-Type": "application/json",
+#           "Authorization": "Bearer " + env.WEBHOOK_SECRET,
+#         },
+#         body: JSON.stringify({
+#           from: message.from,
+#           to: message.to,
+#           raw: rawEmail,
+#         }),
+#       });
+#       if (!response.ok) {
+#         message.setReject(`Webhook returned ${response.status}`);
+#       }
+#     },
+#   };
+#
+# [email]
+# Required for inbound email (webhook):
+# webhookSecret = "your-random-secret"
+#
+# Required for outbound email (SMTP) — omit these if you only need inbound:
+# smtpHost = "smtp.example.com"
+# smtpPort = 587
+# smtpUser = "bot@example.com"
+# smtpPassword = "your-smtp-password"
+# fromAddress = "bot@example.com"
 
 # Enables the self-programming coder agent. Uses Claude Code headless, which
 # requires subscription auth (see README). The model must be a Claude Code

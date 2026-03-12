@@ -16,7 +16,7 @@ const RETRY_DELAY_MS = 30_000;
 
 // Sources that require allowlist + interlocutor lookup before routing.
 // All other external sources route directly to the main agent.
-const GATED_SOURCES: string[] = ["signal", "telegram", "whatsapp"];
+const GATED_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email"];
 
 export interface RoutingResult {
   agentId: number;

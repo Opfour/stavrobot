@@ -72,6 +72,22 @@ describe("loadAllowlist — malformed file", () => {
     expect(() => loadAllowlist(makeConfig())).toThrow("'whatsapp' must be an array of strings");
   });
 
+  it("throws when email contains non-strings", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], email: [123] }));
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    expect(() => loadAllowlist(makeConfig())).toThrow("'email' must be an array of strings");
+  });
+
+  it("throws when email is not an array", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], email: "user@example.com" }));
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    expect(() => loadAllowlist(makeConfig())).toThrow("'email' must be an array of strings");
+  });
+
   it("throws when signal contains non-strings", async () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [123], telegram: [] }));
@@ -304,6 +320,54 @@ describe("loadAllowlist", () => {
     // No write needed since nothing changed.
     expect(mockWriteFileSync).not.toHaveBeenCalled();
   });
+
+  it("defaults email to [] when field is absent in existing allowlist.json", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: ["+1111111111"], telegram: [42] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    const allowlist = loadAllowlist(makeConfig());
+
+    expect(allowlist.email).toEqual([]);
+  });
+
+  it("auto-seeds owner email identity when not already present", async () => {
+    mockExistsSync.mockReturnValue(false);
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    const config = makeConfig({ owner: { name: "Owner", email: "owner@example.com" } });
+    const allowlist = loadAllowlist(config);
+
+    expect(allowlist.email).toContain("owner@example.com");
+  });
+
+  it("normalizes owner email to lowercase when seeding", async () => {
+    mockExistsSync.mockReturnValue(false);
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    const config = makeConfig({ owner: { name: "Owner", email: "Owner@Example.COM" } });
+    const allowlist = loadAllowlist(config);
+
+    expect(allowlist.email).toContain("owner@example.com");
+    expect(allowlist.email).not.toContain("Owner@Example.COM");
+  });
+
+  it("does not duplicate owner email identity when already present in file", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], email: ["owner@example.com"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    const config = makeConfig({ owner: { name: "Owner", email: "owner@example.com" } });
+    const allowlist = loadAllowlist(config);
+
+    expect(allowlist.email.filter((e) => e === "owner@example.com")).toHaveLength(1);
+    // No write needed since nothing changed.
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
 });
 
 describe("getAllowlist", () => {
@@ -347,7 +411,7 @@ describe("saveAllowlist", () => {
     const config = makeConfig();
     loadAllowlist(config);
 
-    const newAllowlist = { signal: ["+5555555555"], telegram: [99], whatsapp: ["+7777777777"], notes: { "+5555555555": "Test note" } };
+    const newAllowlist = { signal: ["+5555555555"], telegram: [99], whatsapp: ["+7777777777"], email: [], notes: { "+5555555555": "Test note" } };
     saveAllowlist(newAllowlist);
 
     const written = mockWriteFileSync.mock.calls[0][1] as string;
@@ -364,7 +428,7 @@ describe("saveAllowlist", () => {
     const { loadAllowlist, saveAllowlist } = await import("./allowlist.js");
     loadAllowlist(makeConfig());
 
-    saveAllowlist({ signal: ["+1111111111"], telegram: [], whatsapp: [], notes: { "+1111111111": "Work" } });
+    saveAllowlist({ signal: ["+1111111111"], telegram: [], whatsapp: [], email: [], notes: { "+1111111111": "Work" } });
 
     const written = mockWriteFileSync.mock.calls[0][1] as string;
     const parsed = JSON.parse(written);
@@ -507,6 +571,51 @@ describe("isInAllowlist", () => {
     expect(isInAllowlist("whatsapp", "+1111111111")).toBe(true);
     expect(isInAllowlist("whatsapp", "+9999999999")).toBe(true);
   });
+
+  it("returns true for an email address in the allowlist", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], email: ["user@example.com"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("email", "user@example.com")).toBe(true);
+  });
+
+  it("returns false for an email address not in the allowlist", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], email: ["user@example.com"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("email", "other@example.com")).toBe(false);
+  });
+
+  it("matches email case-insensitively", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], email: ["user@example.com"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("email", "User@Example.COM")).toBe(true);
+  });
+
+  it("returns true for any email identifier when the allowlist contains '*'", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], email: ["*"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("email", "anyone@example.com")).toBe(true);
+    expect(isInAllowlist("email", "other@test.org")).toBe(true);
+  });
 });
 
 describe("getOwnerIdentities", () => {
@@ -518,6 +627,7 @@ describe("getOwnerIdentities", () => {
     expect(identities.signal).toEqual([]);
     expect(identities.telegram).toEqual([]);
     expect(identities.whatsapp).toEqual([]);
+    expect(identities.email).toEqual([]);
   });
 
   it("returns the owner signal number when set", async () => {
@@ -542,5 +652,21 @@ describe("getOwnerIdentities", () => {
     const identities = getOwnerIdentities(config);
 
     expect(identities.whatsapp).toEqual(["+1234567890"]);
+  });
+
+  it("returns the owner email address when set", async () => {
+    const { getOwnerIdentities } = await import("./allowlist.js");
+    const config = makeConfig({ owner: { name: "Owner", email: "owner@example.com" } });
+    const identities = getOwnerIdentities(config);
+
+    expect(identities.email).toEqual(["owner@example.com"]);
+  });
+
+  it("normalizes owner email to lowercase in getOwnerIdentities", async () => {
+    const { getOwnerIdentities } = await import("./allowlist.js");
+    const config = makeConfig({ owner: { name: "Owner", email: "Owner@Example.COM" } });
+    const identities = getOwnerIdentities(config);
+
+    expect(identities.email).toEqual(["owner@example.com"]);
   });
 });

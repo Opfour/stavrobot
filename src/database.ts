@@ -1,7 +1,7 @@
 import fs from "fs";
 import pg from "pg";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import { loadPostgresConfig } from "./config.js";
+import { loadPostgresConfig, OWNER_CHANNELS } from "./config.js";
 import { encodeToToon } from "./toon.js";
 import type { OwnerConfig } from "./config.js";
 import { log } from "./log.js";
@@ -227,14 +227,12 @@ export async function seedOwner(pool: pg.Pool, ownerConfig: OwnerConfig): Promis
 
   // Upsert each configured identity for the owner.
   const identities: Array<{ service: string; identifier: string }> = [];
-  if (ownerConfig.signal !== undefined) {
-    identities.push({ service: "signal", identifier: ownerConfig.signal });
-  }
-  if (ownerConfig.telegram !== undefined) {
-    identities.push({ service: "telegram", identifier: ownerConfig.telegram });
-  }
-  if (ownerConfig.whatsapp !== undefined) {
-    identities.push({ service: "whatsapp", identifier: ownerConfig.whatsapp });
+  for (const channel of OWNER_CHANNELS) {
+    const value = ownerConfig[channel];
+    if (value !== undefined) {
+      const identifier = channel === "email" ? value.toLowerCase() : value;
+      identities.push({ service: channel, identifier });
+    }
   }
 
   for (const identity of identities) {

@@ -38,6 +38,8 @@ import {
 import { serveSignalCaptchaPage, handleSignalCaptchaSubmit } from "./signal-captcha.js";
 import { initializeWhatsApp } from "./whatsapp.js";
 import { serveHomePage } from "./home.js";
+import { handleEmailWebhookRequest } from "./email.js";
+import { initializeEmailTransport } from "./email-api.js";
 import { log } from "./log.js";
 
 const CSP_HEADER_VALUE =
@@ -49,6 +51,9 @@ const CSP_HEADER_VALUE =
 
 function isPublicRoute(method: string, pathname: string): boolean {
   if (method === "POST" && pathname === "/telegram/webhook") {
+    return true;
+  }
+  if (method === "POST" && pathname === "/email/webhook") {
     return true;
   }
   // Pages have per-row auth: the route handler checks is_public and enforces auth itself.
@@ -455,6 +460,10 @@ async function main(): Promise<void> {
     await initializeWhatsApp(config.whatsapp);
   }
 
+  if (config.email !== undefined && config.email.smtpHost !== undefined) {
+    initializeEmailTransport(config.email);
+  }
+
   const server = http.createServer((request: http.IncomingMessage, response: http.ServerResponse): void => {
     const url = new URL(request.url || "/", `http://${request.headers.host}`);
     const pathname = url.pathname;
@@ -481,6 +490,13 @@ async function main(): Promise<void> {
       handleChatRequest(request, response);
     } else if (request.method === "POST" && pathname === "/telegram/webhook") {
       handleTelegramWebhookRequest(request, response, config.telegram, telegramWebhookSecret);
+    } else if (request.method === "POST" && pathname === "/email/webhook") {
+      if (config.email !== undefined) {
+        handleEmailWebhookRequest(request, response, config.email);
+      } else {
+        response.writeHead(404, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: "Not found" }));
+      }
     } else if (request.method === "GET" && pathname === "/providers/anthropic/login") {
       serveLoginPage(response);
     } else if (request.method === "POST" && pathname === "/providers/anthropic/login") {

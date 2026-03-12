@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Pool, QueryResult } from "pg";
-import { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool } from "./agent.js";
+import { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool, createSendEmailTool } from "./agent.js";
 import type { Config } from "./config.js";
 import { initInternalFetch } from "./internal-fetch.js";
 
@@ -28,9 +28,16 @@ vi.mock("./whatsapp-api.js", () => ({
   sendWhatsappTextMessage: vi.fn(),
 }));
 
+// Mock the email-api module so tests can control sendEmail behavior.
+vi.mock("./email-api.js", () => ({
+  sendEmail: vi.fn(),
+  initializeEmailTransport: vi.fn(),
+}));
+
 import { resolveRecipient, resolveInterlocutorByName } from "./database.js";
 import { isInAllowlist } from "./allowlist.js";
 import { getWhatsappSocket, sendWhatsappTextMessage } from "./whatsapp-api.js";
+import { sendEmail } from "./email-api.js";
 
 function makeText(result: { content: Array<{ type: string; text?: string }> }): string {
   const block = result.content[0];
@@ -51,6 +58,14 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     owner: { name: "Owner" },
     signal: { account: "+1111111111" },
     telegram: { botToken: "test-token" },
+    email: {
+      smtpHost: "smtp.example.com",
+      smtpPort: 587,
+      smtpUser: "user@example.com",
+      smtpPassword: "secret",
+      fromAddress: "bot@example.com",
+      webhookSecret: "webhook-secret",
+    },
     ...overrides,
   } as Config;
 }
@@ -437,6 +452,130 @@ describe("send_whatsapp_message — attachment send", () => {
     const config = makeConfig({ whatsapp: { account: "test" } });
     const tool = createSendWhatsappMessageTool(pool, config);
     const result = await tool.execute("call-1", { recipient: "+1234567890", attachmentPath: "/etc/passwd" });
+    expect(makeText(result)).toContain("attachmentPath must be under the temporary attachments directory");
+  });
+});
+
+describe("isInAllowlist (via send tools) — email", () => {
+  it("send_email rejects when recipient is not in allowlist", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    vi.mocked(isInAllowlist).mockReturnValue(false);
+    const pool = makeIdentityFoundPool("stranger@example.com");
+    const config = makeConfig();
+    const tool = createSendEmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "stranger@example.com", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("not in the email allowlist");
+  });
+});
+
+describe("send_email — recipient resolution", () => {
+  it("rejects with a specific error when interlocutor exists but has no email identity", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue({ id: 5 });
+    const pool = makeEmptyPool();
+    const config = makeConfig();
+    const tool = createSendEmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "Mom", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("has no email identity");
+    expect(makeText(result)).toContain("manage_interlocutors");
+  });
+
+  it("rejects when display name is not found and raw ID is not in interlocutor_identities", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    const pool = makeEmptyPool();
+    const config = makeConfig();
+    const tool = createSendEmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "unknown@example.com", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("unknown recipient");
+    expect(makeText(result)).toContain("unknown@example.com");
+  });
+
+  it("rejects when display name resolves but resolved identifier is not in allowlist", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue({ identifier: "stranger@example.com" });
+    vi.mocked(isInAllowlist).mockReturnValue(false);
+    const pool = makeEmptyPool();
+    const config = makeConfig();
+    const tool = createSendEmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "Mom", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("not in the email allowlist");
+  });
+
+  it("rejects with disabled error when resolveRecipient returns disabled", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue({ disabled: true, displayName: "Mom" });
+    const pool = makeEmptyPool();
+    const config = makeConfig();
+    const tool = createSendEmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "Mom", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain('Interlocutor "Mom" is disabled');
+  });
+
+  it("rejects with unknown recipient when raw email belongs to a disabled interlocutor", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    // The pool returns no rows because the JOIN filters out disabled interlocutors.
+    const pool = makeEmptyPool();
+    const config = makeConfig();
+    const tool = createSendEmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "disabled@example.com", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("unknown recipient");
+  });
+
+  it("uses a query that joins interlocutors and checks enabled=true for the email raw-ID path", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    const { pool, capturedQuery } = makeCapturingPool();
+    const config = makeConfig();
+    const tool = createSendEmailTool(pool, config);
+    await tool.execute("call-1", { recipient: "test@example.com", subject: "Hi", message: "hello" });
+    expect(capturedQuery.text).toContain("JOIN interlocutors");
+    expect(capturedQuery.text).toContain("enabled = true");
+    expect(capturedQuery.text).toContain("service = 'email'");
+  });
+
+  it("normalizes recipient email to lowercase before allowlist check", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    vi.mocked(isInAllowlist).mockReturnValue(true);
+    vi.mocked(sendEmail).mockResolvedValue(undefined);
+    const pool = makeIdentityFoundPool("test@example.com");
+    const config = makeConfig();
+    const tool = createSendEmailTool(pool, config);
+    await tool.execute("call-1", { recipient: "TEST@EXAMPLE.COM", subject: "Hi", message: "hello" });
+    expect(vi.mocked(isInAllowlist)).toHaveBeenCalledWith("email", "test@example.com");
+  });
+});
+
+describe("send_email — text send", () => {
+  beforeEach(() => {
+    vi.mocked(resolveRecipient).mockResolvedValue({ identifier: "mom@example.com" });
+    vi.mocked(isInAllowlist).mockReturnValue(true);
+    vi.mocked(sendEmail).mockResolvedValue(undefined);
+  });
+
+  it("calls sendEmail with the resolved recipient, subject, and message", async () => {
+    const pool = makeEmptyPool();
+    const config = makeConfig();
+    const tool = createSendEmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "Mom", subject: "Hello", message: "hi there" });
+    expect(vi.mocked(sendEmail)).toHaveBeenCalledWith("mom@example.com", "Hello", "hi there");
+    expect(makeText(result)).toBe("Email sent successfully.");
+  });
+});
+
+describe("send_email — attachment send", () => {
+  beforeEach(() => {
+    vi.mocked(resolveRecipient).mockResolvedValue({ identifier: "mom@example.com" });
+    vi.mocked(isInAllowlist).mockReturnValue(true);
+    vi.mocked(sendEmail).mockResolvedValue(undefined);
+  });
+
+  it("returns error when attachmentPath is outside the temp directory", async () => {
+    const pool = makeEmptyPool();
+    const config = makeConfig();
+    const tool = createSendEmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "Mom", subject: "Hi", message: "hello", attachmentPath: "/etc/passwd" });
     expect(makeText(result)).toContain("attachmentPath must be under the temporary attachments directory");
   });
 });

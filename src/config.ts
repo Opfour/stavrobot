@@ -30,12 +30,24 @@ export interface TelegramConfig {
 
 export interface WhatsappConfig {}
 
+export interface EmailConfig {
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUser?: string;
+  smtpPassword?: string;
+  fromAddress?: string;
+  webhookSecret: string;
+}
+
 export interface OwnerConfig {
   name: string;
   signal?: string;
   telegram?: string;
   whatsapp?: string;
+  email?: string;
 }
+
+export const OWNER_CHANNELS: (keyof OwnerConfig)[] = ["signal", "telegram", "whatsapp", "email"];
 
 export interface Config {
   provider: string;
@@ -52,6 +64,7 @@ export interface Config {
   signal?: SignalConfig;
   telegram?: TelegramConfig;
   whatsapp?: WhatsappConfig;
+  email?: EmailConfig;
   owner: OwnerConfig;
 }
 
