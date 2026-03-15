@@ -3,6 +3,7 @@ import type pg from "pg";
 import type { Agent } from "@mariozechner/pi-agent-core";
 import type { Config } from "./config.js";
 import { AuthError } from "./auth.js";
+import { AbortError } from "./errors.js";
 import type { RoutingResult } from "./queue.js";
 
 // Mock the modules that processQueue depends on so tests don't need real infrastructure.
@@ -38,7 +39,8 @@ const mockResolveInterlocutor = vi.mocked(resolveInterlocutor);
 const mockIsInAllowlist = vi.mocked(isInAllowlist);
 
 // Minimal stubs — the queue only passes these through to handlePrompt, which is mocked.
-const stubAgent = {} as unknown as Agent;
+const mockAbort = vi.fn();
+const stubAgent = { abort: mockAbort } as unknown as Agent;
 const stubPool = {} as unknown as pg.Pool;
 const stubConfig = { publicHostname: "http://localhost" } as unknown as Config;
 
@@ -249,5 +251,45 @@ describe("message routing", () => {
 
     expect(result).toBe("");
     expect(mockHandlePrompt).not.toHaveBeenCalled();
+  });
+});
+
+describe("/stop command", () => {
+  it("returns 'Aborted.' immediately when agent is idle and does not enqueue", async () => {
+    const result = await enqueueMessage("/stop");
+
+    expect(result).toBe("Aborted.");
+    expect(mockHandlePrompt).not.toHaveBeenCalled();
+    expect(mockAbort).not.toHaveBeenCalled();
+  });
+
+  it("is case-insensitive and trims whitespace", async () => {
+    const result = await enqueueMessage("  /STOP  ");
+
+    expect(result).toBe("Aborted.");
+    expect(mockHandlePrompt).not.toHaveBeenCalled();
+  });
+
+  it("calls agent.abort() and resolves cleanly when agent is processing", async () => {
+    // Make handlePrompt hang until abort is called, then throw AbortError.
+    mockHandlePrompt.mockImplementationOnce(
+      () => new Promise<string>((_, reject) => {
+        mockAbort.mockImplementationOnce(() => {
+          reject(new AbortError());
+        });
+      }),
+    );
+
+    const promptPromise = enqueueMessage("hello");
+    // Yield to let processQueue start and call handlePrompt.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const stopResult = await enqueueMessage("/stop");
+    expect(stopResult).toBe("Aborted.");
+    expect(mockAbort).toHaveBeenCalledOnce();
+
+    const promptResult = await promptPromise;
+    expect(promptResult).toBe("Aborted.");
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
   });
 });

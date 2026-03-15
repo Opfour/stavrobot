@@ -28,7 +28,9 @@ import { getWhatsappSocket, e164ToJid, sendWhatsappTextMessage } from "./whatsap
 import { sendEmail } from "./email-api.js";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 import { log } from "./log.js";
+import { AbortError } from "./errors.js";
 export { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
+export { AbortError } from "./errors.js";
 
 function buildPromptSuffix(publicHostname: string): string {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? process.env.TZ ?? "UTC";
@@ -1838,7 +1840,15 @@ export async function handlePrompt(
 
   if (agent.state.error) {
     const errorJson = JSON.stringify(agent.state.error);
-    log.error("[stavrobot] Agent error:", errorJson);
+    // Check if the error was caused by an intentional abort by looking at the
+    // last assistant message's stopReason. agent.state.error is a plain string
+    // (the error message), not the message object, so we must inspect the
+    // conversation history instead.
+    const wasAborted = agent.state.messages.some((message) => {
+      if (message.role !== "assistant") return false;
+      const assistantMessage = message as unknown as AssistantMessage;
+      return assistantMessage.stopReason === "aborted";
+    });
     // Remove error/aborted assistant messages from in-memory state so the next
     // prompt starts clean. These messages are stripped by the library's
     // transformMessages anyway, but leaving them in state can orphan adjacent
@@ -1850,6 +1860,18 @@ export async function handlePrompt(
     });
     agent.replaceMessages(cleanedMessages);
     agent.state.error = undefined;
+    if (wasAborted) {
+      log.info("[stavrobot] Agent aborted.");
+      const cancellationMessage = {
+        role: "user" as const,
+        content: [{ type: "text" as const, text: "[The user cancelled the previous request with /stop.]" }],
+        timestamp: Date.now(),
+      };
+      agent.appendMessage(cancellationMessage);
+      await saveMessage(pool, cancellationMessage, agentId);
+      throw new AbortError();
+    }
+    log.error("[stavrobot] Agent error:", errorJson);
     throw new Error(`Agent error: ${errorJson}`);
   }
 

@@ -2,6 +2,7 @@ import type pg from "pg";
 import type { Agent } from "@mariozechner/pi-agent-core";
 import type { Config } from "./config.js";
 import { handlePrompt } from "./agent.js";
+import { AbortError } from "./errors.js";
 import { AuthError } from "./auth.js";
 import { isInAllowlist } from "./allowlist.js";
 import { sendSignalMessage } from "./signal.js";
@@ -190,7 +191,10 @@ async function processQueue(): Promise<void> {
       entry.resolve(response);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      if (error instanceof AuthError) {
+      if (error instanceof AbortError) {
+        log.info("[stavrobot] Agent was aborted, resolving cleanly.");
+        entry.resolve("Aborted.");
+      } else if (error instanceof AuthError) {
         log.error(`[stavrobot] Auth failure, not retrying: ${errorMessage}`);
         const loginMessage = `Authentication required. Visit ${queueConfig!.publicHostname}/providers/anthropic/login to log in.`;
         if (entry.source === "signal" && entry.sender !== undefined) {
@@ -237,6 +241,16 @@ export function enqueueMessage(
   attachments?: FileAttachment[],
   targetAgentId?: number,
 ): Promise<string> {
+  if (message !== undefined && message.trim().toLowerCase() === "/stop") {
+    if (processing) {
+      log.info("[stavrobot] /stop received, aborting running agent.");
+      queueAgent!.abort();
+    } else {
+      log.info("[stavrobot] /stop received but agent is idle, no-op.");
+    }
+    return Promise.resolve("Aborted.");
+  }
+
   return new Promise<string>((resolve, reject) => {
     queue.push({ message, source, sender, attachments, targetAgentId, retries: 0, resolve, reject });
     if (!processing) {
