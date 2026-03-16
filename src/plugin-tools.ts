@@ -10,6 +10,16 @@ import { internalFetch } from "./internal-fetch.js";
 const PLUGIN_RUNNER_BASE_URL = "http://plugin-runner:3003";
 const CLAUDE_CODE_BASE_URL = "http://coder:3002";
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} bytes`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 interface BundleManifest {
   editable?: boolean;
   permissions?: string[];
@@ -567,7 +577,15 @@ export function createRunPluginToolTool(): AgentTool {
       }
 
       if (filesDir !== undefined) {
-        result += `\n\nFiles produced: ${filesDir}/`;
+        const entries = await fs.readdir(filesDir);
+        const lines = await Promise.all(
+          entries.map(async (entry) => {
+            const filePath = path.join(filesDir, entry);
+            const stat = await fs.stat(filePath);
+            return `- ${filePath} (${formatFileSize(stat.size)})`;
+          }),
+        );
+        result += `\n\nOutput files:\n${lines.join("\n")}`;
       }
 
       return {

@@ -5,6 +5,7 @@ import http.server
 import json
 import os
 import pwd
+import shutil
 import signal
 import subprocess
 import sys
@@ -17,6 +18,7 @@ PORT = 3003
 TIMEOUT_SECONDS = 30
 SIGKILL_GRACE_SECONDS = 5
 CONFIG_PATH = "/root/config/config.toml"
+MAX_FILE_TRANSFER_BYTES = 25 * 1024 * 1024  # 25 MB
 
 
 def load_config() -> str:
@@ -69,12 +71,78 @@ def build_script_content(code: str, dependencies: list[str]) -> str:
     return metadata + code
 
 
-def run_script(code: str, dependencies: list[str]) -> str:
-    """Write code to a temp file, execute it via uv run, and return combined output."""
+def materialize_input_files(files: list[dict[str, str]], uid: int, gid: int) -> None:
+    """Delete and recreate /tmp/input/, then write each file into it."""
+    input_dir = "/tmp/input"
+    shutil.rmtree(input_dir, ignore_errors=True)
+    os.makedirs(input_dir)
+    # Allow the pythonrunner user to enter and read the directory.
+    os.chown(input_dir, uid, gid)
+    os.chmod(input_dir, 0o755)
+
+    for file_entry in files:
+        filename = file_entry["filename"]
+        data = base64.b64decode(file_entry["data"])
+        file_path = os.path.join(input_dir, filename)
+        with open(file_path, "wb") as output_file:
+            output_file.write(data)
+        os.chown(file_path, uid, gid)
+        os.chmod(file_path, 0o644)
+
+
+def prepare_output_dir(uid: int, gid: int) -> None:
+    """Delete and recreate /tmp/output/ so the pythonrunner user can write to it."""
+    output_dir = "/tmp/output"
+    shutil.rmtree(output_dir, ignore_errors=True)
+    os.makedirs(output_dir)
+    os.chown(output_dir, uid, gid)
+    # Allow the pythonrunner user to read and write the directory.
+    os.chmod(output_dir, 0o755)
+
+
+def collect_output_files() -> tuple[list[dict[str, str]], str]:
+    """Scan /tmp/output/ for regular files and base64-encode them.
+
+    Returns a tuple of (files list, warning message). The warning is non-empty
+    only when the total size exceeds the limit, in which case files is empty.
+    """
+    output_dir = "/tmp/output"
+    try:
+        entries = os.listdir(output_dir)
+    except OSError:
+        return [], ""
+
+    file_paths = [
+        os.path.join(output_dir, name)
+        for name in entries
+        if os.path.isfile(os.path.join(output_dir, name))
+    ]
+
+    total_size = sum(os.path.getsize(path) for path in file_paths)
+    if total_size > MAX_FILE_TRANSFER_BYTES:
+        warning = f"Output files ({total_size} bytes) exceed the 25 MB limit and were not returned."
+        print(f"[python-runner] {warning}", file=sys.stderr)
+        return [], warning
+
+    result = []
+    for path in file_paths:
+        with open(path, "rb") as file_handle:
+            encoded = base64.b64encode(file_handle.read()).decode()
+        result.append({"filename": os.path.basename(path), "data": encoded})
+
+    return result, ""
+
+
+def run_script(
+    code: str,
+    dependencies: list[str],
+    files: list[dict[str, str]],
+) -> tuple[str, list[dict[str, str]]]:
+    """Write code to a temp file, execute it via uv run, and return output and output files."""
     try:
         uid, gid = get_pythonrunner_ids()
     except KeyError:
-        return "Failed to spawn process: pythonrunner user not found."
+        return "Failed to spawn process: pythonrunner user not found.", []
 
     script_content = build_script_content(code, dependencies)
 
@@ -90,6 +158,9 @@ def run_script(code: str, dependencies: list[str]) -> str:
 
     # Make the temp file readable by the pythonrunner user.
     os.chmod(script_path, 0o644)
+
+    materialize_input_files(files, uid, gid)
+    prepare_output_dir(uid, gid)
 
     print(
         f"[python-runner] Spawning uv run {script_path} as uid={uid} gid={gid}",
@@ -116,7 +187,7 @@ def run_script(code: str, dependencies: list[str]) -> str:
             )
         except (OSError, subprocess.SubprocessError) as error:
             print(f"[python-runner] Failed to spawn process: {error}", file=sys.stderr)
-            return f"Failed to spawn process: {error}"
+            return f"Failed to spawn process: {error}", []
 
         timed_out = False
         try:
@@ -145,7 +216,11 @@ def run_script(code: str, dependencies: list[str]) -> str:
                 f"[python-runner] Script timed out, partial output length={len(output)}",
                 file=sys.stderr,
             )
-            return output if output else timeout_message
+            return output if output else timeout_message, []
+
+        output_files, size_warning = collect_output_files()
+        if size_warning:
+            output += ("\n" if output else "") + size_warning
 
         if exit_code != 0:
             exit_message = f"Exit code: {exit_code}."
@@ -154,20 +229,25 @@ def run_script(code: str, dependencies: list[str]) -> str:
                 f"[python-runner] Script failed with exit code {exit_code}, output length={len(output)}",
                 file=sys.stderr,
             )
-            return output if output else f"Script exited with code {exit_code} and produced no output."
+            return output if output else f"Script exited with code {exit_code} and produced no output.", output_files
 
-        if not output:
+        if not output and not output_files:
             print("[python-runner] Script succeeded with no output", file=sys.stderr)
-            return "Script produced no output."
+            return "Script produced no output.", []
 
-        print(f"[python-runner] Script succeeded, output length={len(output)}", file=sys.stderr)
-        return output
+        print(
+            f"[python-runner] Script succeeded, output length={len(output)}, output files={len(output_files)}",
+            file=sys.stderr,
+        )
+        return output, output_files
 
     finally:
         try:
             os.unlink(script_path)
         except OSError:
             pass
+        shutil.rmtree("/tmp/input", ignore_errors=True)
+        shutil.rmtree("/tmp/output", ignore_errors=True)
 
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):
@@ -218,13 +298,62 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             return
         dependencies: list[str] = raw_dependencies
 
+        raw_files = payload.get("files") or []
+        if not isinstance(raw_files, list):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "field 'files' must be a list"})
+            return
+
+        files: list[dict[str, str]] = []
+        total_decoded_size = 0
+        for index, file_entry in enumerate(raw_files):
+            if not isinstance(file_entry, dict):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": f"files[{index}] must be an object"})
+                return
+            if "filename" not in file_entry or "data" not in file_entry:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": f"files[{index}] must have 'filename' and 'data' fields"},
+                )
+                return
+            filename = file_entry["filename"]
+            if not isinstance(filename, str) or not isinstance(file_entry["data"], str):
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": f"files[{index}]: 'filename' and 'data' must be strings"},
+                )
+                return
+            # Reject filenames with path separators or that reduce to empty after basename.
+            safe_name = os.path.basename(filename)
+            if not safe_name:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": f"files[{index}]: unsafe or empty filename"},
+                )
+                return
+            try:
+                decoded_data = base64.b64decode(file_entry["data"])
+            except Exception:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": f"files[{index}]: 'data' is not valid base64"},
+                )
+                return
+            total_decoded_size += len(decoded_data)
+            if total_decoded_size > MAX_FILE_TRANSFER_BYTES:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "total size of input files exceeds the 25 MB limit"},
+                )
+                return
+            files.append({"filename": safe_name, "data": file_entry["data"]})
+
         print(
-            f"[python-runner] POST /run: code length={len(code)}, dependencies={len(dependencies)}",
+            f"[python-runner] POST /run: code length={len(code)}, dependencies={len(dependencies)}, input files={len(files)}",
             file=sys.stderr,
         )
 
-        output = run_script(code, dependencies)
-        self._send_json(HTTPStatus.OK, {"output": output})
+        output, output_files = run_script(code, dependencies, files)
+        self._send_json(HTTPStatus.OK, {"output": output, "files": output_files})
 
     def do_GET(self) -> None:
         """Return 404 for all GET requests."""
@@ -258,7 +387,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
         """Return 404 for all CONNECT requests."""
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
-    def _send_json(self, status: HTTPStatus, data: dict[str, str]) -> None:
+    def _send_json(self, status: HTTPStatus, data: dict[str, object]) -> None:
         """Send a JSON response with the given status code and data."""
         body = json.dumps(data).encode()
         self.send_response(status)
