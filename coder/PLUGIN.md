@@ -319,7 +319,7 @@ The environment passed to the tool process is minimal: only `PATH`, `UV_CACHE_DI
 - The entrypoint is executed as a subprocess inside the plugin-runner container.
 - The working directory is set to the tool's own subdirectory (e.g., `/plugins/my-plugin/my_tool/`).
 - Parameters are passed as a JSON object on stdin.
-- The tool must write a JSON object to stdout.
+- The tool must write a JSON object to stdout. Be thoughtful about the data you return — tool output consumes context in the LLM conversation, so each field should earn its place. Consider whether a personal assistant would plausibly use a given piece of data when deciding what to include. For example, a place-search tool should return the name, address, rating, opening hours, phone number, and website — but probably not the business registration number or raw API metadata. When in doubt, lean towards including the field rather than dropping it, but don't blindly pass through entire API responses.
 - Exit code 0 means success; non-zero means failure.
 - Stderr is captured and returned as the error message on failure.
 - There is a 30-second timeout.
