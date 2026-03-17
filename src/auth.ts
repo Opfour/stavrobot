@@ -4,6 +4,8 @@ import { getOAuthApiKey } from "@mariozechner/pi-ai/oauth";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
 
+const BACKGROUND_REFRESH_INTERVAL_MILLISECONDS = 30 * 60 * 1000;
+
 export class AuthError extends Error {
   constructor(message: string) {
     super(message);
@@ -75,4 +77,17 @@ export async function getApiKey(config: Config): Promise<string> {
 
   const finalMessage = lastError instanceof Error ? lastError.message : String(lastError);
   throw new AuthError(`OAuth token refresh failed after ${MAX_RETRIES} attempts: ${finalMessage}`);
+}
+
+export function startBackgroundTokenRefresh(config: Config): void {
+  setInterval(() => {
+    void (async () => {
+      try {
+        await getApiKey(config);
+        log.debug("[stavrobot] Background token refresh succeeded.");
+      } catch (error) {
+        log.error("[stavrobot] Background token refresh failed:", error instanceof Error ? error.message : String(error));
+      }
+    })();
+  }, BACKGROUND_REFRESH_INTERVAL_MILLISECONDS);
 }

@@ -4,6 +4,7 @@ import type { Pool } from "pg";
 import { loadConfig } from "./config.js";
 import { loadAllowlist } from "./allowlist.js";
 import { initInternalFetch } from "./internal-fetch.js";
+import { startBackgroundTokenRefresh } from "./auth.js";
 import { connectDatabase, initializeSchema, initializeMemoriesSchema, initializeCompactionsSchema, initializeCronSchema, seedCronEntries, initializePagesSchema, initializeScratchpadSchema, initializeAgentsSchema, seedOwner, getPageByPath, getPageQueryByPath } from "./database.js";
 import { createAgent } from "./agent.js";
 import { initializeQueue, enqueueMessage } from "./queue.js";
@@ -563,6 +564,10 @@ async function main(): Promise<void> {
   server.listen(port, () => {
     log.info(`Server listening on port ${port}`);
   });
+
+  if (config.authFile !== undefined) {
+    startBackgroundTokenRefresh(config);
+  }
 }
 
 // Only run main() when this file is the entry point, not when imported by tests.

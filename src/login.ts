@@ -8,7 +8,7 @@ import { getBaseStyles } from "./theme.js";
 const CLIENT_ID = atob("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl");
 const AUTHORIZATION_URL = "https://claude.ai/oauth/authorize";
 const TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
-const REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback";
+const REDIRECT_URI = "https://platform.claude.com/oauth/code/callback";
 // Must stay in sync with the SCOPES constant in the Pi library's anthropic.ts, since it
 // is not exported and cannot be imported directly.
 const SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
@@ -60,7 +60,7 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
   <p>
     After completing login, copy the code from the callback page and paste it below.
   </p>
-  <input type="text" id="code-input" placeholder="Paste authorization code here" />
+  <input type="text" id="code-input" autofocus placeholder="Paste authorization code here" />
   <button id="submit-btn" onclick="submitCode()">Submit</button>
   <div id="status"></div>
   <script>
