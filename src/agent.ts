@@ -1275,7 +1275,7 @@ export function truncateContext(messages: AgentMessage[], tokenBudget: number): 
 
 export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent> {
   const model = getModel(config.provider as any, config.model as any);
-  const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool), createSendSignalMessageTool(pool, config), createManageCronTool(pool), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
+  const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool), createSendSignalMessageTool(pool, config), createManageCronTool(pool), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool, config.embeddings), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
   tools.push(
     createManagePluginsTool({ coderEnabled: config.coder !== undefined }),
     createRunPluginToolTool(),

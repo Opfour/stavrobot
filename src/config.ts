@@ -30,6 +30,10 @@ export interface TelegramConfig {
 
 export interface WhatsappConfig {}
 
+export interface EmbeddingsConfig {
+  apiKey: string;
+}
+
 export interface EmailConfig {
   smtpHost?: string;
   smtpPort?: number;
@@ -61,6 +65,7 @@ export interface Config {
   baseAgentPrompt: string;
   customPrompt?: string;
   coder?: CoderConfig;
+  embeddings?: EmbeddingsConfig;
   signal?: SignalConfig;
   telegram?: TelegramConfig;
   whatsapp?: WhatsappConfig;

@@ -119,3 +119,9 @@ botToken = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 # alias: "sonnet", "opus", or "haiku".
 [coder]
 model = "sonnet"
+
+# Optional OpenAI embeddings support. When present, the bot can generate and
+# store vector embeddings for semantic search. This improves the search tool
+# the agent can use to find more relevant messages.
+# [embeddings]
+# apiKey = "your-openai-api-key-here"

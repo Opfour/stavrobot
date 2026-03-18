@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     command:
       - "postgres"
       - "-c"
@@ -80,7 +80,7 @@ services:
         condition: service_started
 
   pg-backup:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     entrypoint: ["/bin/bash", "/scripts/pg-backup.sh"]
     environment:
       TZ: ${TZ:-UTC}

@@ -20,6 +20,9 @@ export async function connectDatabase(): Promise<pg.Pool> {
 }
 
 export async function initializeSchema(pool: pg.Pool): Promise<void> {
+  // Silences the collation version mismatch warning that appears when switching
+  // between Postgres images (e.g. stock postgres:17 to pgvector/pgvector:pg17).
+  await pool.query(`DO $$ BEGIN EXECUTE 'ALTER DATABASE ' || quote_ident(current_database()) || ' REFRESH COLLATION VERSION'; END $$`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
@@ -1068,6 +1071,17 @@ export async function restorePageVersion(pool: pg.Pool, path: string, version: n
   );
 
   return `Page '${path}' restored from version ${version} as version ${nextVersion}.`;
+}
+
+export async function initializeEmbeddingsSchema(pool: pg.Pool): Promise<void> {
+  await pool.query(`CREATE EXTENSION IF NOT EXISTS vector`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS message_embeddings (
+      message_id INTEGER PRIMARY KEY REFERENCES messages(id),
+      embedding vector(1536) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 }
 
 export async function initializeScratchpadSchema(pool: pg.Pool): Promise<void> {

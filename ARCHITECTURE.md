@@ -129,8 +129,7 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 | `compactions` | Summarised history snapshots |
 | `scratchpad` | On-demand knowledge (title injected, body fetched on read) |
 | `cron` | Scheduled entries (cron expression or one-shot fire_at) |
-| `pages` | LLM-authored HTML pages (path, title, content, is_public, mimetype) |
-| `page_queries` | Named SQL queries attached to pages |
+| `pages` | LLM-authored pages (path, mimetype, data BYTEA, is_public, queries JSONB, version INTEGER); append-only versioning — each update inserts a new row; empty `data` is a tombstone |
 | `agents` | Subagent definitions (name, system prompt, tool whitelist) |
 | `interlocutors` | Contact records (display name, assigned agent) |
 | `interlocutor_identities` | Per-channel identifiers (signal/telegram/whatsapp/email) |

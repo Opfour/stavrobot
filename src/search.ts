@@ -1,6 +1,8 @@
 import pg from "pg";
 import { Type } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { EmbeddingsConfig } from "./config.js";
+import { fetchEmbeddings, extractText } from "./embeddings.js";
 import { encodeToToon } from "./toon.js";
 import { log } from "./log.js";
 
@@ -8,6 +10,8 @@ const EXCLUDED_TABLES = new Set(["messages", "compactions"]);
 const TEXT_LIKE_TYPES = new Set(["text", "varchar", "character", "character varying"]);
 const LIMIT_DEFAULT = 10;
 const LIMIT_MAX = 20;
+const RRF_K = 60;
+const TEXT_TRUNCATION_LIMIT = 4000;
 
 interface ColumnRow {
   table_name: string;
@@ -21,11 +25,26 @@ interface TableResult {
   rows: Record<string, unknown>[];
 }
 
-export function createSearchTool(pool: pg.Pool): AgentTool {
+interface MessageRow {
+  id: number;
+  role: string;
+  content: unknown;
+  created_at: Date;
+}
+
+interface RankedMessage {
+  id: number;
+  role: string;
+  content: unknown;
+  created_at: Date;
+  score: number;
+}
+
+export function createSearchTool(pool: pg.Pool, embeddingsConfig?: EmbeddingsConfig): AgentTool {
   return {
     name: "db_search",
     label: "Search",
-    description: "Search all database tables for a text string. Searches across all text columns in all tables.",
+    description: "Search conversation history and all database tables. Always call this tool when the user asks about something that seems familiar but isn't in your current context — search before saying you don't remember.",
     parameters: Type.Object({
       query: Type.String({ description: "The text to search for" }),
       limit: Type.Optional(
@@ -105,7 +124,121 @@ export function createSearchTool(pool: pg.Pool): AgentTool {
         }
       }
 
-      if (tableResults.length === 0) {
+      // Full-text search on messages. We extract only the text parts from the
+      // JSONB content to avoid hitting Postgres's 1MB tsvector limit that would
+      // be triggered by casting the whole blob (which includes metadata, model
+      // info, usage stats, etc.). User messages may store their inner content as
+      // a plain string; assistant messages store it as an array of typed parts.
+      const fullTextResult = await pool.query<MessageRow>(
+        `SELECT m.id, m.role, m.content, m.created_at
+         FROM messages m
+         WHERE m.role IN ('user', 'assistant')
+           AND to_tsvector('english',
+             CASE
+               WHEN jsonb_typeof(m.content->'content') = 'string' THEN m.content->>'content'
+               WHEN jsonb_typeof(m.content->'content') = 'array' THEN (
+                 SELECT coalesce(string_agg(part->>'text', ' '), '')
+                 FROM jsonb_array_elements(m.content->'content') AS part
+                 WHERE part->>'type' = 'text'
+               )
+               ELSE ''
+             END
+           ) @@ plainto_tsquery('english', $1)
+         ORDER BY m.created_at DESC
+         LIMIT $2`,
+        [query, limit],
+      );
+      log.debug(`[stavrobot] search: messages full-text returned ${fullTextResult.rows.length} match(es)`);
+
+      // Assign RRF ranks to full-text results (1-indexed).
+      const fullTextRanks = new Map<number, number>();
+      for (let i = 0; i < fullTextResult.rows.length; i++) {
+        fullTextRanks.set(fullTextResult.rows[i].id, i + 1);
+      }
+
+      // Semantic search on messages when embeddings are configured.
+      const semanticRanks = new Map<number, number>();
+      const semanticRows = new Map<number, MessageRow>();
+
+      if (embeddingsConfig !== undefined) {
+        const truncatedQuery = query.slice(0, TEXT_TRUNCATION_LIMIT);
+        try {
+          const embeddings = await fetchEmbeddings([truncatedQuery], embeddingsConfig.apiKey);
+          const queryVector = `[${embeddings[0].join(",")}]`;
+
+          const semanticResult = await pool.query<MessageRow>(
+            `SELECT m.id, m.role, m.content, m.created_at
+             FROM messages m
+             JOIN message_embeddings me ON me.message_id = m.id
+             WHERE m.role IN ('user', 'assistant')
+             ORDER BY me.embedding <=> $1
+             LIMIT $2`,
+            [queryVector, limit],
+          );
+          log.debug(`[stavrobot] search: messages semantic returned ${semanticResult.rows.length} match(es)`);
+
+          for (let i = 0; i < semanticResult.rows.length; i++) {
+            const row = semanticResult.rows[i];
+            semanticRanks.set(row.id, i + 1);
+            semanticRows.set(row.id, row);
+          }
+        } catch (error) {
+          log.error("[stavrobot] search: embedding call failed, falling back to full-text only:", error instanceof Error ? error.message : String(error));
+        }
+      }
+
+      // Merge full-text and semantic results using Reciprocal Rank Fusion.
+      const allMessageIds = new Set<number>([
+        ...fullTextResult.rows.map((row) => row.id),
+        ...semanticRanks.keys(),
+      ]);
+
+      const mergedMessages: RankedMessage[] = [];
+      for (const messageId of allMessageIds) {
+        const ftRank = fullTextRanks.get(messageId);
+        const semRank = semanticRanks.get(messageId);
+
+        let score = 0;
+        if (ftRank !== undefined) {
+          score += 1 / (RRF_K + ftRank);
+        }
+        if (semRank !== undefined) {
+          score += 1 / (RRF_K + semRank);
+        }
+
+        // Prefer the row from full-text results; fall back to semantic results.
+        const row = fullTextResult.rows.find((r) => r.id === messageId) ?? semanticRows.get(messageId);
+        if (row === undefined) {
+          continue;
+        }
+
+        mergedMessages.push({ ...row, score });
+      }
+
+      // Sort by descending RRF score and take the top N.
+      mergedMessages.sort((a, b) => b.score - a.score);
+      const topMessages = mergedMessages.slice(0, limit);
+
+      const parts: string[] = [];
+
+      for (const tableResult of tableResults) {
+        parts.push(`Table: ${tableResult.tableName} (${tableResult.matchCount} match(es))`);
+        parts.push(encodeToToon(tableResult.rows));
+      }
+
+      if (topMessages.length > 0) {
+        parts.push(`Messages (${topMessages.length} match(es)):`);
+        for (const message of topMessages) {
+          const timestamp = message.created_at.toISOString();
+          // The content field may be a nested object with a content property (as
+          // stored by the embeddings worker), or a plain string/array.
+          const rawContent = (message.content as { content?: unknown }).content ?? message.content;
+          const text = extractText(rawContent);
+          parts.push(`[${timestamp}] ${message.role}: ${text}`);
+        }
+      }
+
+      if (parts.length === 0) {
         const noResultsMessage = `No results found for "${query}".`;
         log.debug("[stavrobot] search: no results found");
         return {
@@ -114,11 +247,6 @@ export function createSearchTool(pool: pg.Pool): AgentTool {
         };
       }
 
-      const parts: string[] = [];
-      for (const tableResult of tableResults) {
-        parts.push(`Table: ${tableResult.tableName} (${tableResult.matchCount} match(es))`);
-        parts.push(encodeToToon(tableResult.rows));
-      }
       const result = parts.join("\n\n");
 
       return {

@@ -5,10 +5,11 @@ import { loadConfig } from "./config.js";
 import { loadAllowlist } from "./allowlist.js";
 import { initInternalFetch } from "./internal-fetch.js";
 import { startBackgroundTokenRefresh } from "./auth.js";
-import { connectDatabase, initializeSchema, initializeMemoriesSchema, initializeCompactionsSchema, initializeCronSchema, seedCronEntries, initializePagesSchema, initializeScratchpadSchema, initializeAgentsSchema, seedOwner, getPageByPath, getPageQueryByPath } from "./database.js";
+import { connectDatabase, initializeSchema, initializeMemoriesSchema, initializeCompactionsSchema, initializeCronSchema, seedCronEntries, initializePagesSchema, initializeScratchpadSchema, initializeAgentsSchema, initializeEmbeddingsSchema, seedOwner, getPageByPath, getPageQueryByPath } from "./database.js";
 import { createAgent } from "./agent.js";
 import { initializeQueue, enqueueMessage } from "./queue.js";
 import { initializeScheduler } from "./scheduler.js";
+import { initializeEmbeddingsWorker } from "./embeddings.js";
 import type { TelegramConfig } from "./config.js";
 import { registerTelegramWebhook, handleTelegramWebhook } from "./telegram.js";
 import { serveLoginPage, handleLoginPost } from "./login.js";
@@ -443,10 +444,12 @@ async function main(): Promise<void> {
   await initializePagesSchema(pool);
   await initializeScratchpadSchema(pool);
   await initializeAgentsSchema(pool);
+  await initializeEmbeddingsSchema(pool);
   await seedOwner(pool, config.owner);
   const agent = await createAgent(config, pool);
   initializeQueue(agent, pool, config);
   await initializeScheduler(pool);
+  initializeEmbeddingsWorker(pool, config);
 
   let telegramWebhookSecret: string | undefined;
   if (config.telegram !== undefined) {
