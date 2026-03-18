@@ -4,7 +4,7 @@
 
 Stavrobot is a personal AI assistant built with the principle of "all the access an AI assistant needs, and no more".
 
-It has all the nice features of an AI assistant, but focuses on sandboxing, isolation, and minimal permissions. It's light and is deployed with only a `docker compose up`.
+It has all the nice features of an AI assistant, but focuses on sandboxing, isolation, and minimal permissions. It's lightweight and is deployed with only a `docker compose up`.
 
 ## Features
 
