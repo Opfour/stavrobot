@@ -1157,11 +1157,18 @@ export async function deleteScratchpad(pool: pg.Pool, id: number): Promise<numbe
   return result.rowCount ?? 0;
 }
 
+const MAX_SQL_RESULT_BYTES = 50 * 1024;
+
 export async function executeSql(pool: pg.Pool, sql: string): Promise<string> {
   const result = await pool.query(sql);
 
   if (result.command === "SELECT") {
-    return encodeToToon(result.rows);
+    const encoded = encodeToToon(result.rows);
+    if (encoded.length > MAX_SQL_RESULT_BYTES) {
+      const truncated = encoded.slice(0, MAX_SQL_RESULT_BYTES);
+      return `${truncated}\n\n[TRUNCATED — result was ${encoded.length} bytes, showing first ${MAX_SQL_RESULT_BYTES}. Use LIMIT or narrow your SELECT to reduce output.]`;
+    }
+    return encoded;
   } else {
     return encodeToToon({ rowCount: result.rowCount });
   }
