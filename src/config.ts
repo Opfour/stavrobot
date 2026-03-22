@@ -94,7 +94,7 @@ export function loadConfig(): Config {
   config.baseAgentPrompt = fs.readFileSync(AGENT_PROMPT_PATH, "utf-8").trimEnd();
 
   if (config.compactionTokenThreshold === undefined) {
-    config.compactionTokenThreshold = 60000;
+    config.compactionTokenThreshold = 80000;
   }
 
   if (config.apiKey === undefined && config.authFile === undefined) {
