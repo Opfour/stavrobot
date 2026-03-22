@@ -242,7 +242,9 @@ main()
 
 ## Receiving files
 
-Tools can declare parameters with `"type": "file"` to receive a file from the caller. At runtime, the parameter value in the JSON on stdin will be a file path (e.g., `/tmp/my-plugin/voice-note.ogg`). The plugin-runner materializes the file into the plugin's temp directory (`/tmp/<plugin_name>/`) before the tool starts, so the file is ready to read when the tool runs.
+To accept a file from the user, declare a parameter with `"type": "file"` in the tool manifest. When the LLM calls `run_plugin_tool`, it passes the absolute path to the file (e.g. a path it received from an incoming attachment or from `manage_files`). The system reads the file, transports it to the plugin-runner container, and writes it into the plugin's temp directory (`/tmp/<plugin_name>/`). At runtime, the parameter value in the JSON on stdin will be the materialized file path (e.g., `/tmp/my-plugin/voice-note.ogg`), ready to read.
+
+Use `"type": "file"` any time a tool needs to operate on a file the user has sent (audio, images, documents, etc.) rather than asking the user to provide the file contents as text.
 
 Rules:
 

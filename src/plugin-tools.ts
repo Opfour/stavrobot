@@ -479,7 +479,7 @@ export function createRunPluginToolTool(): AgentTool {
   return {
     name: "run_plugin_tool",
     label: "Run plugin tool",
-    description: "Run a tool from an installed plugin with the given parameters. The parameters must match the tool's schema as shown by manage_plugins (action: show).",
+    description: "Run a tool from an installed plugin with the given parameters. The parameters must match the tool's schema as shown by manage_plugins (action: show). For parameters with type \"file\", pass the absolute path to the file (e.g. a path returned by manage_files or received as an incoming attachment).",
     parameters: Type.Object({
       plugin: Type.String({ description: "The plugin name." }),
       tool: Type.String({ description: "The tool name." }),
