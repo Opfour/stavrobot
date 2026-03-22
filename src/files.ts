@@ -4,6 +4,7 @@ import { Type } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 import { log } from "./log.js";
+import { toolError, toolSuccess } from "./tool-result.js";
 
 const FILES_DIR = path.join(TEMP_ATTACHMENTS_DIR, "files");
 
@@ -49,7 +50,7 @@ export function createManageFilesTool(): AgentTool {
     execute: async (
       toolCallId: string,
       params: unknown
-    ): Promise<AgentToolResult<{ result: string }>> => {
+    ): Promise<AgentToolResult<{ message: string }>> => {
       const raw = params as {
         action: string;
         filename?: string;
@@ -60,10 +61,7 @@ export function createManageFilesTool(): AgentTool {
       const action = raw.action;
 
       if (action === "help") {
-        return {
-          content: [{ type: "text" as const, text: HELP_TEXT }],
-          details: { result: HELP_TEXT },
-        };
+        return toolSuccess(HELP_TEXT);
       }
 
       if (action === "list") {
@@ -80,33 +78,19 @@ export function createManageFilesTool(): AgentTool {
         const absolutePaths = filenames.map((name) => path.join(FILES_DIR, name));
         const result = absolutePaths.join("\n");
         log.debug(`[stavrobot] manage_files list: ${filenames.length} file(s)`);
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(result);
       }
 
       if (action === "write") {
         if (raw.filename === undefined || raw.filename.trim() === "") {
-          const errorMessage = "Error: filename is required for write.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { result: errorMessage },
-          };
+          return toolError("Error: filename is required for write.");
         }
         const filenameError = validateFilename(raw.filename);
         if (filenameError !== null) {
-          return {
-            content: [{ type: "text" as const, text: filenameError }],
-            details: { result: filenameError },
-          };
+          return toolError(filenameError);
         }
         if (raw.content === undefined) {
-          const errorMessage = "Error: content is required for write.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { result: errorMessage },
-          };
+          return toolError("Error: content is required for write.");
         }
 
         await fs.mkdir(FILES_DIR, { recursive: true });
@@ -121,68 +105,41 @@ export function createManageFilesTool(): AgentTool {
         }
 
         log.debug(`[stavrobot] manage_files write: ${filePath}`);
-        return {
-          content: [{ type: "text" as const, text: filePath }],
-          details: { result: filePath },
-        };
+        return toolSuccess(filePath);
       }
 
       if (action === "read") {
         if (raw.filename === undefined || raw.filename.trim() === "") {
-          const errorMessage = "Error: filename is required for read.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { result: errorMessage },
-          };
+          return toolError("Error: filename is required for read.");
         }
         const filenameError = validateFilename(raw.filename);
         if (filenameError !== null) {
-          return {
-            content: [{ type: "text" as const, text: filenameError }],
-            details: { result: filenameError },
-          };
+          return toolError(filenameError);
         }
 
         const filePath = path.join(FILES_DIR, raw.filename);
         const fileContent = await fs.readFile(filePath, "utf-8");
         log.debug(`[stavrobot] manage_files read: ${filePath} (${fileContent.length} chars)`);
-        return {
-          content: [{ type: "text" as const, text: fileContent }],
-          details: { result: fileContent },
-        };
+        return toolSuccess(fileContent);
       }
 
       if (action === "delete") {
         if (raw.filename === undefined || raw.filename.trim() === "") {
-          const errorMessage = "Error: filename is required for delete.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { result: errorMessage },
-          };
+          return toolError("Error: filename is required for delete.");
         }
         const filenameError = validateFilename(raw.filename);
         if (filenameError !== null) {
-          return {
-            content: [{ type: "text" as const, text: filenameError }],
-            details: { result: filenameError },
-          };
+          return toolError(filenameError);
         }
 
         const filePath = path.join(FILES_DIR, raw.filename);
         await fs.unlink(filePath);
         const successMessage = `File deleted: ${filePath}`;
         log.debug(`[stavrobot] manage_files delete: ${filePath}`);
-        return {
-          content: [{ type: "text" as const, text: successMessage }],
-          details: { result: successMessage },
-        };
+        return toolSuccess(successMessage);
       }
 
-      const errorMessage = `Error: unknown action '${action}'. Valid actions: write, read, list, delete, help.`;
-      return {
-        content: [{ type: "text" as const, text: errorMessage }],
-        details: { result: errorMessage },
-      };
+      return toolError(`Error: unknown action '${action}'. Valid actions: write, read, list, delete, help.`);
     },
   };
 }

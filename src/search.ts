@@ -6,6 +6,7 @@ import { fetchEmbeddings, extractText } from "./embeddings.js";
 import { getMainAgentId, loadLatestCompaction } from "./database.js";
 import { encodeToToon } from "./toon.js";
 import { log } from "./log.js";
+import { toolSuccess } from "./tool-result.js";
 
 const EXCLUDED_TABLES = new Set(["messages", "compactions"]);
 const TEXT_LIKE_TYPES = new Set(["text", "varchar", "character", "character varying"]);
@@ -280,7 +281,7 @@ export function createSearchTool(pool: pg.Pool, embeddingsConfig?: EmbeddingsCon
     execute: async (
       toolCallId: string,
       params: unknown,
-    ): Promise<AgentToolResult<{ result: string }>> => {
+    ): Promise<AgentToolResult<{ message: string }>> => {
       const { query, limit: rawLimit } = params as { query: string; limit?: number };
       const limit = Math.min(LIMIT_MAX, Math.max(1, rawLimit ?? LIMIT_DEFAULT));
 
@@ -307,20 +308,11 @@ export function createSearchTool(pool: pg.Pool, embeddingsConfig?: EmbeddingsCon
       }
 
       if (parts.length === 0) {
-        const noResultsMessage = `No results found for "${query}".`;
         log.debug("[stavrobot] search: no results found");
-        return {
-          content: [{ type: "text" as const, text: noResultsMessage }],
-          details: { result: noResultsMessage },
-        };
+        return toolSuccess(`No results found for "${query}".`);
       }
 
-      const result = parts.join("\n\n");
-
-      return {
-        content: [{ type: "text" as const, text: result }],
-        details: { result },
-      };
+      return toolSuccess(parts.join("\n\n"));
     },
   };
 }

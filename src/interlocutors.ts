@@ -4,6 +4,7 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { getOwnerInterlocutorId } from "./database.js";
 import { encodeToToon } from "./toon.js";
 import { log } from "./log.js";
+import { toolError, toolSuccess } from "./tool-result.js";
 
 const HELP_TEXT = `manage_interlocutors tool — full documentation
 
@@ -156,28 +157,17 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
       const { action } = raw;
 
       if (action === "help") {
-        return {
-          content: [{ type: "text" as const, text: HELP_TEXT }],
-          details: { message: HELP_TEXT },
-        };
+        return toolSuccess(HELP_TEXT);
       }
 
       if (action === "create") {
         if (raw.display_name === undefined || raw.display_name.trim() === "") {
-          const errorMessage = "Error: display_name is required for create.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: display_name is required for create.");
         }
         const hasService = raw.service !== undefined && raw.service.trim() !== "";
         const hasIdentifier = raw.identifier !== undefined && raw.identifier.trim() !== "";
         if (hasService !== hasIdentifier) {
-          const errorMessage = "Error: service and identifier must both be provided or both absent.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: service and identifier must both be provided or both absent.");
         }
 
         // The DB default for enabled is true, so omitting it means the interlocutor
@@ -186,11 +176,7 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
         const willBeEnabled = raw.enabled !== false;
         const agentId = raw.agent_id ?? null;
         if (willBeEnabled && agentId === null) {
-          const errorMessage = "Error: cannot create an enabled interlocutor without an agent_id. Either provide an agent_id or set enabled to false.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: cannot create an enabled interlocutor without an agent_id. Either provide an agent_id or set enabled to false.");
         }
 
         const client = await pool.connect();
@@ -220,11 +206,7 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
             );
             if (identityResult.rowCount === 0) {
               await client.query("ROLLBACK");
-              const errorMessage = `Error: identity (${raw.service!.trim()}, ${raw.identifier!.trim()}) is already assigned to another interlocutor.`;
-              return {
-                content: [{ type: "text" as const, text: errorMessage }],
-                details: { message: errorMessage },
-              };
+              return toolError(`Error: identity (${raw.service!.trim()}, ${raw.identifier!.trim()}) is already assigned to another interlocutor.`);
             }
           }
           await client.query("COMMIT");
@@ -238,11 +220,7 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
         log.info(`[stavrobot] Interlocutor ${newId} created.`);
         const record = await fetchInterlocutorById(pool, newId);
         if (record === undefined) {
-          const errorMessage = `Error: interlocutor ${newId} not found.`;
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(`Error: interlocutor ${newId} not found.`);
         }
         const text = encodeToToon(record);
         return {
@@ -253,18 +231,10 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
 
       if (action === "update") {
         if (raw.id === undefined) {
-          const errorMessage = "Error: id is required for update.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: id is required for update.");
         }
         if (raw.id === getOwnerInterlocutorId()) {
-          const errorMessage = "Error: Cannot modify the owner interlocutor.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: Cannot modify the owner interlocutor.");
         }
 
         const setClauses: string[] = [];
@@ -286,11 +256,7 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
         }
 
         if (setClauses.length === 0) {
-          const errorMessage = "Error: no fields to update. Provide at least one of display_name, agent_id, or enabled.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: no fields to update. Provide at least one of display_name, agent_id, or enabled.");
         }
 
         // Fetch the current row to determine the resulting enabled/agent_id state
@@ -312,11 +278,7 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
             resultingAgentId = current.agent_id;
           }
           if (resultingEnabled && resultingAgentId === null) {
-            const errorMessage = "Error: cannot enable an interlocutor without an agent_id. Either provide an agent_id or set enabled to false.";
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError("Error: cannot enable an interlocutor without an agent_id. Either provide an agent_id or set enabled to false.");
           }
         }
 
@@ -329,11 +291,7 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
         log.info(`[stavrobot] Interlocutor ${raw.id} updated.`);
         const record = await fetchInterlocutorById(pool, raw.id);
         if (record === undefined) {
-          const errorMessage = `Error: interlocutor ${raw.id} not found.`;
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(`Error: interlocutor ${raw.id} not found.`);
         }
         const text = encodeToToon(record);
         return {
@@ -344,18 +302,10 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
 
       if (action === "delete") {
         if (raw.id === undefined) {
-          const errorMessage = "Error: id is required for delete.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: id is required for delete.");
         }
         if (raw.id === getOwnerInterlocutorId()) {
-          const errorMessage = "Error: Cannot modify the owner interlocutor.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: Cannot modify the owner interlocutor.");
         }
 
         await pool.query(
@@ -366,11 +316,7 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
         log.info(`[stavrobot] Identities removed from interlocutor ${raw.id}.`);
         const record = await fetchInterlocutorById(pool, raw.id);
         if (record === undefined) {
-          const errorMessage = `Error: interlocutor ${raw.id} not found.`;
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(`Error: interlocutor ${raw.id} not found.`);
         }
         const text = encodeToToon(record);
         return {
@@ -381,32 +327,16 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
 
       if (action === "add_identity") {
         if (raw.id === undefined) {
-          const errorMessage = "Error: id is required for add_identity.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: id is required for add_identity.");
         }
         if (raw.id === getOwnerInterlocutorId()) {
-          const errorMessage = "Error: Cannot modify the owner interlocutor.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: Cannot modify the owner interlocutor.");
         }
         if (raw.service === undefined || raw.service.trim() === "") {
-          const errorMessage = "Error: service is required for add_identity.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: service is required for add_identity.");
         }
         if (raw.identifier === undefined || raw.identifier.trim() === "") {
-          const errorMessage = "Error: identifier is required for add_identity.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: identifier is required for add_identity.");
         }
 
         const identityResult = await pool.query(
@@ -415,21 +345,13 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
           [raw.id, raw.service.trim(), raw.identifier.trim()],
         );
         if (identityResult.rowCount === 0) {
-          const errorMessage = `Error: identity (${raw.service.trim()}, ${raw.identifier.trim()}) is already assigned to another interlocutor.`;
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(`Error: identity (${raw.service.trim()}, ${raw.identifier.trim()}) is already assigned to another interlocutor.`);
         }
 
         log.info(`[stavrobot] Identity added to interlocutor ${raw.id}.`);
         const record = await fetchInterlocutorById(pool, raw.id);
         if (record === undefined) {
-          const errorMessage = `Error: interlocutor ${raw.id} not found.`;
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(`Error: interlocutor ${raw.id} not found.`);
         }
         const text = encodeToToon(record);
         return {
@@ -440,32 +362,16 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
 
       if (action === "remove_identity") {
         if (raw.id === undefined) {
-          const errorMessage = "Error: id is required for remove_identity.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: id is required for remove_identity.");
         }
         if (raw.id === getOwnerInterlocutorId()) {
-          const errorMessage = "Error: Cannot modify the owner interlocutor.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: Cannot modify the owner interlocutor.");
         }
         if (raw.service === undefined || raw.service.trim() === "") {
-          const errorMessage = "Error: service is required for remove_identity.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: service is required for remove_identity.");
         }
         if (raw.identifier === undefined || raw.identifier.trim() === "") {
-          const errorMessage = "Error: identifier is required for remove_identity.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: identifier is required for remove_identity.");
         }
 
         await pool.query(
@@ -476,11 +382,7 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
         log.info(`[stavrobot] Identity removed from interlocutor ${raw.id}.`);
         const record = await fetchInterlocutorById(pool, raw.id);
         if (record === undefined) {
-          const errorMessage = `Error: interlocutor ${raw.id} not found.`;
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(`Error: interlocutor ${raw.id} not found.`);
         }
         const text = encodeToToon(record);
         return {
@@ -541,18 +443,10 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
         }
 
         const interlocutors = Array.from(interlocutorMap.values());
-        const message = encodeToToon(interlocutors);
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(encodeToToon(interlocutors));
       }
 
-      const errorMessage = `Error: unknown action '${action}'. Valid actions: help, create, update, delete, add_identity, remove_identity, list.`;
-      return {
-        content: [{ type: "text" as const, text: errorMessage }],
-        details: { message: errorMessage },
-      };
+      return toolError(`Error: unknown action '${action}'. Valid actions: help, create, update, delete, add_identity, remove_identity, list.`);
     },
   };
 }

@@ -30,6 +30,7 @@ import { sendEmail } from "./email-api.js";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 import { log } from "./log.js";
 import { AbortError } from "./errors.js";
+import { toolError, toolSuccess } from "./tool-result.js";
 export { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 export { AbortError } from "./errors.js";
 
@@ -128,13 +129,10 @@ export function createExecuteSqlTool(pool: pg.Pool): AgentTool {
     execute: async (
       toolCallId: string,
       params: unknown
-    ): Promise<AgentToolResult<{ result: string }>> => {
+    ): Promise<AgentToolResult<{ message: string }>> => {
       const { query } = params as { query: string };
       const result = await executeSql(pool, query);
-      return {
-        content: [{ type: "text" as const, text: result }],
-        details: { result },
-      };
+      return toolSuccess(result);
     },
   };
 }
@@ -192,180 +190,98 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
       const { action, store } = raw;
 
       if (action === "help") {
-        return {
-          content: [{ type: "text" as const, text: MANAGE_KNOWLEDGE_HELP_TEXT }],
-          details: { message: MANAGE_KNOWLEDGE_HELP_TEXT },
-        };
+        return toolSuccess(MANAGE_KNOWLEDGE_HELP_TEXT);
       }
 
       if (action === "upsert") {
         if (store === undefined) {
-          const errorMessage = "Error: store is required for upsert.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: store is required for upsert.");
         }
 
         if (store === "memory") {
           if (raw.content === undefined || raw.content.trim() === "") {
-            const errorMessage = "Error: content is required when upserting a memory entry.";
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError("Error: content is required when upserting a memory entry.");
           }
           const memoryResult = await upsertMemory(pool, raw.id, raw.content);
           if (raw.id !== undefined && memoryResult.rowCount === 0) {
-            const errorMessage = `Error: memory ${raw.id} not found.`;
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError(`Error: memory ${raw.id} not found.`);
           }
           const message = raw.id === undefined ? `Memory ${memoryResult.id} created.` : `Memory ${memoryResult.id} updated.`;
           log.info(`[stavrobot] ${message}`);
-          return {
-            content: [{ type: "text" as const, text: message }],
-            details: { message },
-          };
+          return toolSuccess(message);
         }
 
         if (store === "scratchpad") {
           if (raw.title === undefined || raw.title.trim() === "") {
-            const errorMessage = "Error: title is required when upserting a scratchpad entry.";
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError("Error: title is required when upserting a scratchpad entry.");
           }
           if (raw.body === undefined || raw.body.trim() === "") {
-            const errorMessage = "Error: body is required when upserting a scratchpad entry.";
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError("Error: body is required when upserting a scratchpad entry.");
           }
           const scratchpadResult = await upsertScratchpad(pool, raw.id, raw.title, raw.body);
           if (raw.id !== undefined && scratchpadResult.rowCount === 0) {
-            const errorMessage = `Error: scratchpad entry ${raw.id} not found.`;
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError(`Error: scratchpad entry ${raw.id} not found.`);
           }
           const message = raw.id === undefined ? `Scratchpad entry ${scratchpadResult.id} created.` : `Scratchpad entry ${scratchpadResult.id} updated.`;
           log.info(`[stavrobot] ${message}`);
-          return {
-            content: [{ type: "text" as const, text: message }],
-            details: { message },
-          };
+          return toolSuccess(message);
         }
 
-        const errorMessage = `Error: unknown store '${store}'. Valid stores: memory, scratchpad.`;
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(`Error: unknown store '${store}'. Valid stores: memory, scratchpad.`);
       }
 
       if (action === "delete") {
         if (store === undefined) {
-          const errorMessage = "Error: store is required for delete.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: store is required for delete.");
         }
 
         if (raw.id === undefined) {
-          const errorMessage = "Error: id is required for delete.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: id is required for delete.");
         }
 
         if (store === "memory") {
           const rowCount = await deleteMemory(pool, raw.id);
           if (rowCount === 0) {
-            const errorMessage = `Error: memory ${raw.id} not found.`;
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError(`Error: memory ${raw.id} not found.`);
           }
           const message = `Memory ${raw.id} deleted.`;
           log.info(`[stavrobot] ${message}`);
-          return {
-            content: [{ type: "text" as const, text: message }],
-            details: { message },
-          };
+          return toolSuccess(message);
         }
 
         if (store === "scratchpad") {
           const rowCount = await deleteScratchpad(pool, raw.id);
           if (rowCount === 0) {
-            const errorMessage = `Error: scratchpad entry ${raw.id} not found.`;
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError(`Error: scratchpad entry ${raw.id} not found.`);
           }
           const message = `Scratchpad entry ${raw.id} deleted.`;
           log.info(`[stavrobot] ${message}`);
-          return {
-            content: [{ type: "text" as const, text: message }],
-            details: { message },
-          };
+          return toolSuccess(message);
         }
 
-        const errorMessage = `Error: unknown store '${store}'. Valid stores: memory, scratchpad.`;
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(`Error: unknown store '${store}'. Valid stores: memory, scratchpad.`);
       }
 
       if (action === "read") {
         if (store !== "scratchpad") {
-          const errorMessage = "Error: read is only supported for the scratchpad store.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: read is only supported for the scratchpad store.");
         }
 
         if (raw.id === undefined) {
-          const errorMessage = "Error: id is required for read.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: id is required for read.");
         }
 
         const entry = await readScratchpad(pool, raw.id);
         if (entry === null) {
-          const errorMessage = `Error: scratchpad entry ${raw.id} not found.`;
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(`Error: scratchpad entry ${raw.id} not found.`);
         }
 
         log.info(`[stavrobot] Scratchpad entry ${entry.id} read.`);
         const message = `Title: ${entry.title}\n\n${entry.body}`;
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
-      const errorMessage = `Error: unknown action '${action}'. Valid actions: upsert, delete, read, help.`;
-      return {
-        content: [{ type: "text" as const, text: errorMessage }],
-        details: { message: errorMessage },
-      };
+      return toolError(`Error: unknown action '${action}'. Valid actions: upsert, delete, read, help.`);
     },
   };
 }
@@ -399,10 +315,7 @@ export function createSendSignalMessageTool(pool: pg.Pool, config: Config): Agen
       const attachmentPath = raw.attachmentPath?.trim() || undefined;
 
       if (message === undefined && attachmentPath === undefined) {
-        return {
-          content: [{ type: "text" as const, text: "Error: at least one of message or attachmentPath must be provided." }],
-          details: { message: "Error: at least one of message or attachmentPath must be provided." },
-        };
+        return toolError("Error: at least one of message or attachmentPath must be provided.");
       }
 
       // Resolve display name to phone number, falling back to treating the input as a raw phone number.
@@ -413,10 +326,7 @@ export function createSendSignalMessageTool(pool: pg.Pool, config: Config): Agen
       } else if (resolved !== null && "disabled" in resolved) {
         const errorMessage = `Error: Interlocutor "${resolved.displayName}" is disabled.`;
         log.warn("[stavrobot] send_signal_message rejected:", errorMessage);
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(errorMessage);
       } else {
         // If the input matches an interlocutor by name but they have no Signal identity,
         // give a specific error rather than falling through to the raw-ID path.
@@ -424,10 +334,7 @@ export function createSendSignalMessageTool(pool: pg.Pool, config: Config): Agen
         if (interlocutor !== null) {
           const errorMessage = `Error: interlocutor '${recipientInput}' has no Signal identity. Use manage_interlocutors to add one.`;
           log.warn("[stavrobot] send_signal_message rejected:", errorMessage);
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(errorMessage);
         }
         // Soft gate: raw ID must exist in interlocutor_identities for an enabled interlocutor.
         const identityCheck = await pool.query<{ identifier: string }>(
@@ -437,10 +344,7 @@ export function createSendSignalMessageTool(pool: pg.Pool, config: Config): Agen
         if (identityCheck.rows.length === 0) {
           const errorMessage = `Error: unknown recipient '${recipientInput}'. No interlocutor found with that display name or phone number.`;
           log.warn("[stavrobot] send_signal_message rejected:", errorMessage);
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(errorMessage);
         }
         recipient = recipientInput;
       }
@@ -449,10 +353,7 @@ export function createSendSignalMessageTool(pool: pg.Pool, config: Config): Agen
       if (!isInAllowlist("signal", recipient)) {
         const errorMessage = `Error: recipient '${recipient}' is not in the Signal allowlist.`;
         log.warn("[stavrobot] send_signal_message rejected:", errorMessage);
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(errorMessage);
       }
 
       const signalPreview = (message ?? "").slice(0, 200);
@@ -461,10 +362,7 @@ export function createSendSignalMessageTool(pool: pg.Pool, config: Config): Agen
       if (attachmentPath !== undefined) {
         const resolvedAttachmentPath = path.resolve(attachmentPath);
         if (!resolvedAttachmentPath.startsWith(TEMP_ATTACHMENTS_DIR)) {
-          return {
-            content: [{ type: "text" as const, text: "Error: attachmentPath must be under the temporary attachments directory." }],
-            details: { message: "Error: attachmentPath must be under the temporary attachments directory." },
-          };
+          return toolError("Error: attachmentPath must be under the temporary attachments directory.");
         }
         const fileBuffer = await fs.readFile(resolvedAttachmentPath);
         const body: {
@@ -492,11 +390,7 @@ export function createSendSignalMessageTool(pool: pg.Pool, config: Config): Agen
 
         if (response.status === 429) {
           log.warn("[stavrobot] send_signal_message rate limited by bridge (attachment path)");
-          const rateLimitMessage = signalRateLimitMessage(config.publicHostname);
-          return {
-            content: [{ type: "text" as const, text: rateLimitMessage }],
-            details: { message: rateLimitMessage },
-          };
+          return toolError(signalRateLimitMessage(config.publicHostname));
         }
 
         if (!response.ok) {
@@ -526,28 +420,16 @@ export function createSendSignalMessageTool(pool: pg.Pool, config: Config): Agen
 
         log.debug("[stavrobot] send_signal_message bridge response status:", response.status);
 
-        const successMessage = "Message sent successfully.";
-        return {
-          content: [{ type: "text" as const, text: successMessage }],
-          details: { message: successMessage },
-        };
+        return toolSuccess("Message sent successfully.");
       }
 
       const sendResult = await sendSignalMessage(recipient, message as string);
       if (sendResult === "rate_limited") {
         log.warn("[stavrobot] send_signal_message rate limited by bridge (text-only path)");
-        const rateLimitMessage = signalRateLimitMessage(config.publicHostname);
-        return {
-          content: [{ type: "text" as const, text: rateLimitMessage }],
-          details: { message: rateLimitMessage },
-        };
+        return toolError(signalRateLimitMessage(config.publicHostname));
       }
 
-      const successMessage = "Message sent successfully.";
-      return {
-        content: [{ type: "text" as const, text: successMessage }],
-        details: { message: successMessage },
-      };
+      return toolSuccess("Message sent successfully.");
     },
   };
 }
@@ -577,18 +459,11 @@ export function createSendTelegramMessageTool(pool: pg.Pool, config: Config): Ag
       const attachmentPath = raw.attachmentPath?.trim() || undefined;
 
       if (message === undefined && attachmentPath === undefined) {
-        return {
-          content: [{ type: "text" as const, text: "Error: at least one of message or attachmentPath must be provided." }],
-          details: { message: "Error: at least one of message or attachmentPath must be provided." },
-        };
+        return toolError("Error: at least one of message or attachmentPath must be provided.");
       }
 
       if (config.telegram === undefined) {
-        const errorMessage = "Error: Telegram is not configured.";
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError("Error: Telegram is not configured.");
       }
 
       // Resolve display name to chat ID, falling back to treating the input as a raw chat ID.
@@ -599,10 +474,7 @@ export function createSendTelegramMessageTool(pool: pg.Pool, config: Config): Ag
       } else if (resolved !== null && "disabled" in resolved) {
         const errorMessage = `Error: Interlocutor "${resolved.displayName}" is disabled.`;
         log.warn("[stavrobot] send_telegram_message rejected:", errorMessage);
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(errorMessage);
       } else {
         // If the input matches an interlocutor by name but they have no Telegram identity,
         // give a specific error rather than falling through to the raw-ID path.
@@ -610,10 +482,7 @@ export function createSendTelegramMessageTool(pool: pg.Pool, config: Config): Ag
         if (interlocutor !== null) {
           const errorMessage = `Error: interlocutor '${recipientInput}' has no Telegram identity. Use manage_interlocutors to add one.`;
           log.warn("[stavrobot] send_telegram_message rejected:", errorMessage);
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(errorMessage);
         }
         // Soft gate: raw ID must exist in interlocutor_identities for an enabled interlocutor.
         const identityCheck = await pool.query<{ identifier: string }>(
@@ -623,10 +492,7 @@ export function createSendTelegramMessageTool(pool: pg.Pool, config: Config): Ag
         if (identityCheck.rows.length === 0) {
           const errorMessage = `Error: unknown recipient '${recipientInput}'. No interlocutor found with that display name or chat ID.`;
           log.warn("[stavrobot] send_telegram_message rejected:", errorMessage);
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(errorMessage);
         }
         recipient = recipientInput;
       }
@@ -635,10 +501,7 @@ export function createSendTelegramMessageTool(pool: pg.Pool, config: Config): Ag
       if (!isInAllowlist("telegram", recipient)) {
         const errorMessage = `Error: recipient '${recipient}' is not in the Telegram allowlist.`;
         log.warn("[stavrobot] send_telegram_message rejected:", errorMessage);
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(errorMessage);
       }
 
       const baseUrl = `https://api.telegram.org/bot${config.telegram.botToken}`;
@@ -649,10 +512,7 @@ export function createSendTelegramMessageTool(pool: pg.Pool, config: Config): Ag
       if (attachmentPath !== undefined) {
         const resolvedAttachmentPath = path.resolve(attachmentPath);
         if (!resolvedAttachmentPath.startsWith(TEMP_ATTACHMENTS_DIR)) {
-          return {
-            content: [{ type: "text" as const, text: "Error: attachmentPath must be under the temporary attachments directory." }],
-            details: { message: "Error: attachmentPath must be under the temporary attachments directory." },
-          };
+          return toolError("Error: attachmentPath must be under the temporary attachments directory.");
         }
 
         const extension = path.extname(resolvedAttachmentPath).toLowerCase();
@@ -698,18 +558,11 @@ export function createSendTelegramMessageTool(pool: pg.Pool, config: Config): Ag
           const description = errorBody.description ?? "unknown error";
           const errorMessage = `Error: Telegram API error ${response.status}: ${description}`;
           log.error(`[stavrobot] send_telegram_message ${apiMethod} error:`, errorMessage);
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(errorMessage);
         }
 
         log.debug(`[stavrobot] send_telegram_message ${apiMethod} response status:`, response.status);
-        const successMessage = "Message sent successfully.";
-        return {
-          content: [{ type: "text" as const, text: successMessage }],
-          details: { message: successMessage },
-        };
+        return toolSuccess("Message sent successfully.");
       }
 
       // Text-only path: convert markdown to Telegram HTML and call sendMessage.
@@ -719,17 +572,10 @@ export function createSendTelegramMessageTool(pool: pg.Pool, config: Config): Ag
       } catch (error) {
         const errorMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
         log.error("[stavrobot] send_telegram_message sendMessage error:", errorMessage);
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(errorMessage);
       }
 
-      const successMessage = "Message sent successfully.";
-      return {
-        content: [{ type: "text" as const, text: successMessage }],
-        details: { message: successMessage },
-      };
+      return toolSuccess("Message sent successfully.");
     },
   };
 }
@@ -759,10 +605,7 @@ export function createSendWhatsappMessageTool(pool: pg.Pool, config: Config): Ag
       const attachmentPath = raw.attachmentPath?.trim() || undefined;
 
       if (message === undefined && attachmentPath === undefined) {
-        return {
-          content: [{ type: "text" as const, text: "Error: at least one of message or attachmentPath must be provided." }],
-          details: { message: "Error: at least one of message or attachmentPath must be provided." },
-        };
+        return toolError("Error: at least one of message or attachmentPath must be provided.");
       }
 
       // Resolve display name to phone number, falling back to treating the input as a raw phone number.
@@ -773,10 +616,7 @@ export function createSendWhatsappMessageTool(pool: pg.Pool, config: Config): Ag
       } else if (resolved !== null && "disabled" in resolved) {
         const errorMessage = `Error: Interlocutor "${resolved.displayName}" is disabled.`;
         log.warn("[stavrobot] send_whatsapp_message rejected:", errorMessage);
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(errorMessage);
       } else {
         // If the input matches an interlocutor by name but they have no WhatsApp identity,
         // give a specific error rather than falling through to the raw-ID path.
@@ -784,10 +624,7 @@ export function createSendWhatsappMessageTool(pool: pg.Pool, config: Config): Ag
         if (interlocutor !== null) {
           const errorMessage = `Error: interlocutor '${recipientInput}' has no WhatsApp identity. Use manage_interlocutors to add one.`;
           log.warn("[stavrobot] send_whatsapp_message rejected:", errorMessage);
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(errorMessage);
         }
         // Soft gate: raw ID must exist in interlocutor_identities for an enabled interlocutor.
         const identityCheck = await pool.query<{ identifier: string }>(
@@ -797,10 +634,7 @@ export function createSendWhatsappMessageTool(pool: pg.Pool, config: Config): Ag
         if (identityCheck.rows.length === 0) {
           const errorMessage = `Error: unknown recipient '${recipientInput}'. No interlocutor found with that display name or phone number.`;
           log.warn("[stavrobot] send_whatsapp_message rejected:", errorMessage);
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(errorMessage);
         }
         recipient = recipientInput;
       }
@@ -809,10 +643,7 @@ export function createSendWhatsappMessageTool(pool: pg.Pool, config: Config): Ag
       if (!isInAllowlist("whatsapp", recipient)) {
         const errorMessage = `Error: recipient '${recipient}' is not in the WhatsApp allowlist.`;
         log.warn("[stavrobot] send_whatsapp_message rejected:", errorMessage);
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(errorMessage);
       }
 
       const whatsappPreview = (message ?? "").slice(0, 200);
@@ -821,18 +652,12 @@ export function createSendWhatsappMessageTool(pool: pg.Pool, config: Config): Ag
       if (attachmentPath !== undefined) {
         const resolvedAttachmentPath = path.resolve(attachmentPath);
         if (!resolvedAttachmentPath.startsWith(TEMP_ATTACHMENTS_DIR)) {
-          return {
-            content: [{ type: "text" as const, text: "Error: attachmentPath must be under the temporary attachments directory." }],
-            details: { message: "Error: attachmentPath must be under the temporary attachments directory." },
-          };
+          return toolError("Error: attachmentPath must be under the temporary attachments directory.");
         }
 
         const socket = getWhatsappSocket();
         if (socket === undefined) {
-          return {
-            content: [{ type: "text" as const, text: "Error: WhatsApp is not connected." }],
-            details: { message: "Error: WhatsApp is not connected." },
-          };
+          return toolError("Error: WhatsApp is not connected.");
         }
 
         const extension = path.extname(resolvedAttachmentPath).toLowerCase();
@@ -872,20 +697,12 @@ export function createSendWhatsappMessageTool(pool: pg.Pool, config: Config): Ag
         }
 
         log.debug("[stavrobot] send_whatsapp_message attachment sent successfully.");
-        const successMessage = "Message sent successfully.";
-        return {
-          content: [{ type: "text" as const, text: successMessage }],
-          details: { message: successMessage },
-        };
+        return toolSuccess("Message sent successfully.");
       }
 
       await sendWhatsappTextMessage(recipient, message as string);
 
-      const successMessage = "Message sent successfully.";
-      return {
-        content: [{ type: "text" as const, text: successMessage }],
-        details: { message: successMessage },
-      };
+      return toolSuccess("Message sent successfully.");
     },
   };
 }
@@ -925,10 +742,7 @@ export function createSendEmailTool(pool: pg.Pool, config: Config): AgentTool {
       } else if (resolved !== null && "disabled" in resolved) {
         const errorMessage = `Error: Interlocutor "${resolved.displayName}" is disabled.`;
         log.warn("[stavrobot] send_email rejected:", errorMessage);
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(errorMessage);
       } else {
         // If the input matches an interlocutor by name but they have no email identity,
         // give a specific error rather than falling through to the raw-ID path.
@@ -936,10 +750,7 @@ export function createSendEmailTool(pool: pg.Pool, config: Config): AgentTool {
         if (interlocutor !== null) {
           const errorMessage = `Error: interlocutor '${recipientInput}' has no email identity. Use manage_interlocutors to add one.`;
           log.warn("[stavrobot] send_email rejected:", errorMessage);
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(errorMessage);
         }
         // Soft gate: raw ID must exist in interlocutor_identities for an enabled interlocutor.
         const normalizedInput = recipientInput.toLowerCase();
@@ -950,10 +761,7 @@ export function createSendEmailTool(pool: pg.Pool, config: Config): AgentTool {
         if (identityCheck.rows.length === 0) {
           const errorMessage = `Error: unknown recipient '${recipientInput}'. No interlocutor found with that display name or email address.`;
           log.warn("[stavrobot] send_email rejected:", errorMessage);
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(errorMessage);
         }
         recipient = normalizedInput;
       }
@@ -965,10 +773,7 @@ export function createSendEmailTool(pool: pg.Pool, config: Config): AgentTool {
       if (!isInAllowlist("email", recipient)) {
         const errorMessage = `Error: recipient '${recipient}' is not in the email allowlist.`;
         log.warn("[stavrobot] send_email rejected:", errorMessage);
-        return {
-          content: [{ type: "text" as const, text: errorMessage }],
-          details: { message: errorMessage },
-        };
+        return toolError(errorMessage);
       }
 
       const emailPreview = message.slice(0, 200);
@@ -977,10 +782,7 @@ export function createSendEmailTool(pool: pg.Pool, config: Config): AgentTool {
       if (attachmentPath !== undefined) {
         const resolvedAttachmentPath = path.resolve(attachmentPath);
         if (!resolvedAttachmentPath.startsWith(TEMP_ATTACHMENTS_DIR)) {
-          return {
-            content: [{ type: "text" as const, text: "Error: attachmentPath must be under the temporary attachments directory." }],
-            details: { message: "Error: attachmentPath must be under the temporary attachments directory." },
-          };
+          return toolError("Error: attachmentPath must be under the temporary attachments directory.");
         }
 
         await sendEmail(recipient, subject, message, [
@@ -990,20 +792,12 @@ export function createSendEmailTool(pool: pg.Pool, config: Config): AgentTool {
         // The path check above guarantees this is a temp file, so always delete it.
         await fs.unlink(resolvedAttachmentPath);
 
-        const successMessage = "Email sent successfully.";
-        return {
-          content: [{ type: "text" as const, text: successMessage }],
-          details: { message: successMessage },
-        };
+        return toolSuccess("Email sent successfully.");
       }
 
       await sendEmail(recipient, subject, message);
 
-      const successMessage = "Email sent successfully.";
-      return {
-        content: [{ type: "text" as const, text: successMessage }],
-        details: { message: successMessage },
-      };
+      return toolSuccess("Email sent successfully.");
     },
   };
 }
@@ -1055,30 +849,18 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
       const action = raw.action;
 
       if (action === "help") {
-        return {
-          content: [{ type: "text" as const, text: MANAGE_CRON_HELP_TEXT }],
-          details: { message: MANAGE_CRON_HELP_TEXT },
-        };
+        return toolSuccess(MANAGE_CRON_HELP_TEXT);
       }
 
       if (action === "create") {
         if (raw.note === undefined || raw.note.trim() === "") {
-          return {
-            content: [{ type: "text" as const, text: "Error: note is required for create." }],
-            details: { message: "Error: note is required for create." },
-          };
+          return toolError("Error: note is required for create.");
         }
         if (raw.schedule === undefined && raw.fire_at === undefined) {
-          return {
-            content: [{ type: "text" as const, text: "Error: exactly one of schedule or fire_at must be provided." }],
-            details: { message: "Error: exactly one of schedule or fire_at must be provided." },
-          };
+          return toolError("Error: exactly one of schedule or fire_at must be provided.");
         }
         if (raw.schedule !== undefined && raw.fire_at !== undefined) {
-          return {
-            content: [{ type: "text" as const, text: "Error: schedule and fire_at are mutually exclusive." }],
-            details: { message: "Error: schedule and fire_at are mutually exclusive." },
-          };
+          return toolError("Error: schedule and fire_at are mutually exclusive.");
         }
         const cronExpression = raw.schedule ?? null;
         const fireAt = raw.fire_at !== undefined ? new Date(raw.fire_at) : null;
@@ -1086,24 +868,15 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
         await reloadScheduler(pool);
         const message = `Cron entry ${entry.id} created.`;
         log.info(`[stavrobot] ${message}`);
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
       if (action === "update") {
         if (raw.id === undefined) {
-          return {
-            content: [{ type: "text" as const, text: "Error: id is required for update." }],
-            details: { message: "Error: id is required for update." },
-          };
+          return toolError("Error: id is required for update.");
         }
         if (raw.schedule !== undefined && raw.fire_at !== undefined) {
-          return {
-            content: [{ type: "text" as const, text: "Error: schedule and fire_at are mutually exclusive." }],
-            details: { message: "Error: schedule and fire_at are mutually exclusive." },
-          };
+          return toolError("Error: schedule and fire_at are mutually exclusive.");
         }
         const fields: { cronExpression?: string | null; fireAt?: Date | null; note?: string } = {};
         if (raw.schedule !== undefined) {
@@ -1121,42 +894,26 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
         await reloadScheduler(pool);
         const message = `Cron entry ${raw.id} updated.`;
         log.info(`[stavrobot] ${message}`);
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
       if (action === "delete") {
         if (raw.id === undefined) {
-          return {
-            content: [{ type: "text" as const, text: "Error: id is required for delete." }],
-            details: { message: "Error: id is required for delete." },
-          };
+          return toolError("Error: id is required for delete.");
         }
         await deleteCronEntry(pool, raw.id);
         await reloadScheduler(pool);
         const message = `Cron entry ${raw.id} deleted.`;
         log.info(`[stavrobot] ${message}`);
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
       if (action === "list") {
         const entries = await listCronEntries(pool);
-        const message = encodeToToon(entries);
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(encodeToToon(entries));
       }
 
-      return {
-        content: [{ type: "text" as const, text: `Error: unknown action '${action}'. Valid actions: create, update, delete, list, help.` }],
-        details: { message: `Error: unknown action '${action}'.` },
-      };
+      return toolError(`Error: unknown action '${action}'. Valid actions: create, update, delete, list, help.`);
     },
   };
 }
@@ -1752,18 +1509,10 @@ export function filterToolsForSubagent(tools: AgentTool[], allowedTools: string[
             }
             const access = pluginAccessMap.get(pluginName);
             if (access === undefined) {
-              const errorMessage = `Plugin '${pluginName}' (tool '${toolName}') is not in this agent's allowed plugins.`;
-              return {
-                content: [{ type: "text" as const, text: errorMessage }],
-                details: { message: errorMessage },
-              };
+              return toolError(`Plugin '${pluginName}' (tool '${toolName}') is not in this agent's allowed plugins.`);
             }
             if (access !== "*" && !access.has(toolName)) {
-              const errorMessage = `Plugin '${pluginName}' (tool '${toolName}') is not in this agent's allowed plugins.`;
-              return {
-                content: [{ type: "text" as const, text: errorMessage }],
-                details: { message: errorMessage },
-              };
+              return toolError(`Plugin '${pluginName}' (tool '${toolName}') is not in this agent's allowed plugins.`);
             }
             return originalExecute(toolCallId, params, signal, onUpdate);
           },
@@ -1788,18 +1537,10 @@ export function filterToolsForSubagent(tools: AgentTool[], allowedTools: string[
         execute: async (toolCallId, params, signal, onUpdate) => {
           const action = (params as Record<string, unknown>)["action"];
           if (typeof action !== "string") {
-            const errorMessage = `Tool "${toolName}" requires an action parameter because it is scoped to specific actions. Allowed actions: ${list}.`;
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError(`Tool "${toolName}" requires an action parameter because it is scoped to specific actions. Allowed actions: ${list}.`);
           }
           if (!allowedActions.has(action)) {
-            const errorMessage = `Action "${action}" is not allowed on tool "${toolName}". Allowed actions: ${list}.`;
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError(`Action "${action}" is not allowed on tool "${toolName}". Allowed actions: ${list}.`);
           }
           return originalExecute(toolCallId, params, signal, onUpdate);
         },

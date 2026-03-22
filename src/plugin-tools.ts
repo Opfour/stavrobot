@@ -6,6 +6,7 @@ import { encodeToToon } from "./toon.js";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 import { log } from "./log.js";
 import { internalFetch } from "./internal-fetch.js";
+import { toolError, toolSuccess } from "./tool-result.js";
 
 const PLUGIN_RUNNER_BASE_URL = "http://plugin-runner:3003";
 const CLAUDE_CODE_BASE_URL = "http://coder:3002";
@@ -156,7 +157,7 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
     execute: async (
       toolCallId: string,
       params: unknown,
-    ): Promise<AgentToolResult<{ result: string }>> => {
+    ): Promise<AgentToolResult<{ message: string }>> => {
       const raw = params as {
         action: string;
         name?: string;
@@ -168,19 +169,12 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
       const action = raw.action;
 
       if (action === "help") {
-        return {
-          content: [{ type: "text" as const, text: MANAGE_PLUGINS_HELP_TEXT }],
-          details: { result: MANAGE_PLUGINS_HELP_TEXT },
-        };
+        return toolSuccess(MANAGE_PLUGINS_HELP_TEXT);
       }
 
       if (action === "install") {
         if (raw.url === undefined || raw.url.trim() === "") {
-          const result = "Error: url is required for install.";
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolError("Error: url is required for install.");
         }
         const url = raw.url;
         const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/install`, {
@@ -189,20 +183,12 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
           body: JSON.stringify({ url }),
         });
         const responseText = await response.text();
-        const result = formatPluginRunnerResponse(responseText);
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(formatPluginRunnerResponse(responseText));
       }
 
       if (action === "update") {
         if (raw.name === undefined || raw.name.trim() === "") {
-          const result = "Error: name is required for update.";
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolError("Error: name is required for update.");
         }
         const name = raw.name;
         const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/update`, {
@@ -211,20 +197,12 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
           body: JSON.stringify({ name }),
         });
         const responseText = await response.text();
-        const result = formatPluginRunnerResponse(responseText);
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(formatPluginRunnerResponse(responseText));
       }
 
       if (action === "remove") {
         if (raw.name === undefined || raw.name.trim() === "") {
-          const result = "Error: name is required for remove.";
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolError("Error: name is required for remove.");
         }
         const name = raw.name;
         const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/remove`, {
@@ -233,27 +211,15 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
           body: JSON.stringify({ name }),
         });
         const responseText = await response.text();
-        const result = formatPluginRunnerResponse(responseText);
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(formatPluginRunnerResponse(responseText));
       }
 
       if (action === "configure") {
         if (raw.name === undefined || raw.name.trim() === "") {
-          const result = "Error: name is required for configure.";
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolError("Error: name is required for configure.");
         }
         if (raw.config === undefined || raw.config.trim() === "") {
-          const result = "Error: config is required for configure.";
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolError("Error: config is required for configure.");
         }
         const name = raw.name;
         const config = raw.config;
@@ -261,11 +227,7 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
         try {
           parsedConfig = JSON.parse(config);
         } catch {
-          const result = "Error: config is not valid JSON.";
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolError("Error: config is not valid JSON.");
         }
         // Plugin permissions are set via the web UI only. The LLM must not be
         // able to modify its own tool restrictions (user decision, see DECISIONLOG.md).
@@ -278,11 +240,7 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
           body: JSON.stringify({ name, config: parsedConfig }),
         });
         const responseText = await response.text();
-        const result = formatPluginRunnerResponse(responseText);
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(formatPluginRunnerResponse(responseText));
       }
 
       if (action === "list") {
@@ -317,28 +275,17 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
         } catch {
           result = formatPluginRunnerResponse(responseText);
         }
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(result);
       }
 
       if (action === "show") {
         if (raw.name === undefined || raw.name.trim() === "") {
-          const result = "Error: name is required for show.";
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolError("Error: name is required for show.");
         }
         const name = raw.name;
         const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${name}`);
         if (response.status === 404) {
-          const result = `Plugin '${name}' not found.`;
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolSuccess(`Plugin '${name}' not found.`);
         }
         const responseText = await response.text();
         let result: string;
@@ -374,33 +321,18 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
         } catch {
           result = formatPluginRunnerResponse(responseText);
         }
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(result);
       }
 
       if (action === "create") {
         if (!options.coderEnabled) {
-          const result = "Error: the create action requires the coder to be configured.";
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolError("Error: the create action requires the coder to be configured.");
         }
         if (raw.name === undefined || raw.name.trim() === "") {
-          const result = "Error: name is required for create.";
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolError("Error: name is required for create.");
         }
         if (raw.plugin_description === undefined || raw.plugin_description.trim() === "") {
-          const result = "Error: plugin_description is required for create.";
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolError("Error: plugin_description is required for create.");
         }
         const name = raw.name;
         const description = raw.plugin_description;
@@ -410,18 +342,10 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
           body: JSON.stringify({ name, description }),
         });
         const responseText = await response.text();
-        const result = formatPluginRunnerResponse(responseText);
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(formatPluginRunnerResponse(responseText));
       }
 
-      const result = `Error: unknown action '${action}'. Valid actions: install, update, remove, configure, list, show, create, help.`;
-      return {
-        content: [{ type: "text" as const, text: result }],
-        details: { result },
-      };
+      return toolError(`Error: unknown action '${action}'. Valid actions: install, update, remove, configure, list, show, create, help.`);
     },
   };
 }
@@ -488,38 +412,26 @@ export function createRunPluginToolTool(): AgentTool {
     execute: async (
       toolCallId: string,
       params: unknown,
-    ): Promise<AgentToolResult<{ result: string }>> => {
+    ): Promise<AgentToolResult<{ message: string }>> => {
       const { plugin, tool, parameters } = params as { plugin: string; tool: string; parameters: string };
       const parsedParameters = JSON.parse(parameters) as unknown;
 
       const bundleResponse = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${plugin}`);
       if (bundleResponse.status === 404) {
-        const result = `Plugin '${plugin}' not found.`;
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(`Plugin '${plugin}' not found.`);
       }
       const bundleText = await bundleResponse.text();
       let manifest: unknown;
       try {
         manifest = JSON.parse(bundleText) as unknown;
       } catch {
-        const result = `Failed to parse plugin manifest for '${plugin}'.`;
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(`Failed to parse plugin manifest for '${plugin}'.`);
       }
       if (isBundleManifest(manifest) && Array.isArray(manifest.permissions)) {
         const permissions = manifest.permissions as string[];
         if (permissions.length === 0) {
-          const result = `Plugin '${plugin}' not found.`;
           log.debug(`[stavrobot] run_plugin_tool: rejected '${plugin}/${tool}' — plugin is disabled`);
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolSuccess(`Plugin '${plugin}' not found.`);
         }
         if (!permissions.includes("*") && !permissions.includes(tool)) {
           const availableTools = Array.isArray(manifest.tools)
@@ -533,10 +445,7 @@ export function createRunPluginToolTool(): AgentTool {
               : "";
           const result = `Tool '${tool}' not found on plugin '${plugin}'.${availablePart}`;
           log.debug(`[stavrobot] run_plugin_tool: rejected '${plugin}/${tool}' — tool not in permissions list`);
-          return {
-            content: [{ type: "text" as const, text: result }],
-            details: { result },
-          };
+          return toolSuccess(result);
         }
       }
 
@@ -597,10 +506,7 @@ export function createRunPluginToolTool(): AgentTool {
         result += `\n\nOutput files:\n${lines.join("\n")}`;
       }
 
-      return {
-        content: [{ type: "text" as const, text: result }],
-        details: { result },
-      };
+      return toolSuccess(result);
     },
   };
 }
@@ -634,16 +540,12 @@ export function createRequestCodingTaskTool(): AgentTool {
     execute: async (
       toolCallId: string,
       params: unknown,
-    ): Promise<AgentToolResult<{ result: string }>> => {
+    ): Promise<AgentToolResult<{ message: string }>> => {
       const { plugin, message } = params as { plugin: string; message: string };
 
       const bundleResponse = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${plugin}`);
       if (bundleResponse.status === 404) {
-        const result = `Plugin '${plugin}' not found. Create it first with manage_plugins (action: create).`;
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(`Plugin '${plugin}' not found. Create it first with manage_plugins (action: create).`);
       }
 
       const bundleText = await bundleResponse.text();
@@ -651,19 +553,11 @@ export function createRequestCodingTaskTool(): AgentTool {
       try {
         manifest = JSON.parse(bundleText) as unknown;
       } catch {
-        const result = `Failed to parse plugin manifest for '${plugin}'.`;
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(`Failed to parse plugin manifest for '${plugin}'.`);
       }
 
       if (!isBundleManifest(manifest) || manifest.editable !== true) {
-        const result = `Plugin '${plugin}' is not editable. Only locally created plugins can be modified by the coding agent.`;
-        return {
-          content: [{ type: "text" as const, text: result }],
-          details: { result },
-        };
+        return toolSuccess(`Plugin '${plugin}' is not editable. Only locally created plugins can be modified by the coding agent.`);
       }
 
       const taskId = crypto.randomUUID();
@@ -673,11 +567,7 @@ export function createRequestCodingTaskTool(): AgentTool {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ taskId, plugin, message }),
       });
-      const result = `Coding task ${taskId} submitted for plugin '${plugin}'. The coder agent will respond when done.`;
-      return {
-        content: [{ type: "text" as const, text: result }],
-        details: { result },
-      };
+      return toolSuccess(`Coding task ${taskId} submitted for plugin '${plugin}'. The coder agent will respond when done.`);
     },
   };
 }

@@ -2,6 +2,7 @@ import pg from "pg";
 import { Type } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { upsertPage, deletePage, readPage, listPageVersions, restorePageVersion } from "./database.js";
+import { toolError, toolSuccess } from "./tool-result.js";
 
 const MANAGE_PAGES_HELP_TEXT = `manage_pages: create, update, delete, read, and version web pages.
 
@@ -61,54 +62,30 @@ export function createManagePagesTool(pool: pg.Pool): AgentTool {
       const action = raw.action;
 
       if (action === "help") {
-        return {
-          content: [{ type: "text" as const, text: MANAGE_PAGES_HELP_TEXT }],
-          details: { message: MANAGE_PAGES_HELP_TEXT },
-        };
+        return toolSuccess(MANAGE_PAGES_HELP_TEXT);
       }
 
       if (action === "upsert") {
         if (raw.path === undefined || raw.path.trim() === "") {
-          const errorMessage = "Error: path is required for upsert.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: path is required for upsert.");
         }
 
         const message = await upsertPage(pool, raw.path, raw.mimetype, raw.content, raw.is_public, raw.queries);
-
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
       if (action === "delete") {
         if (raw.path === undefined || raw.path.trim() === "") {
-          const errorMessage = "Error: path is required for delete.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: path is required for delete.");
         }
 
         const deleted = await deletePage(pool, raw.path);
-        const message = deleted ? `Page deleted: ${raw.path}` : `Page not found: ${raw.path}`;
-
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(deleted ? `Page deleted: ${raw.path}` : `Page not found: ${raw.path}`);
       }
 
       if (action === "read") {
         if (raw.path === undefined || raw.path.trim() === "") {
-          const errorMessage = "Error: path is required for read.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: path is required for read.");
         }
 
         const page = await readPage(pool, raw.path, raw.version);
@@ -116,10 +93,7 @@ export function createManagePagesTool(pool: pg.Pool): AgentTool {
           const message = raw.version !== undefined
             ? `Page not found: ${raw.path} version ${raw.version}`
             : `Page not found: ${raw.path}`;
-          return {
-            content: [{ type: "text" as const, text: message }],
-            details: { message },
-          };
+          return toolSuccess(message);
         }
 
         const message = JSON.stringify({
@@ -132,28 +106,17 @@ export function createManagePagesTool(pool: pg.Pool): AgentTool {
           created_at: page.createdAt,
         }, null, 2);
 
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
       if (action === "list_versions") {
         if (raw.path === undefined || raw.path.trim() === "") {
-          const errorMessage = "Error: path is required for list_versions.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: path is required for list_versions.");
         }
 
         const versions = await listPageVersions(pool, raw.path);
         if (versions.length === 0) {
-          const message = `No versions found for page: ${raw.path}`;
-          return {
-            content: [{ type: "text" as const, text: message }],
-            details: { message },
-          };
+          return toolSuccess(`No versions found for page: ${raw.path}`);
         }
 
         const message = JSON.stringify(
@@ -166,41 +129,22 @@ export function createManagePagesTool(pool: pg.Pool): AgentTool {
           2,
         );
 
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
       if (action === "restore_version") {
         if (raw.path === undefined || raw.path.trim() === "") {
-          const errorMessage = "Error: path is required for restore_version.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: path is required for restore_version.");
         }
         if (raw.version === undefined) {
-          const errorMessage = "Error: version is required for restore_version.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: version is required for restore_version.");
         }
 
         const message = await restorePageVersion(pool, raw.path, raw.version);
-
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
-      const errorMessage = `Error: unknown action '${action}'. Valid actions: upsert, delete, read, list_versions, restore_version, help.`;
-      return {
-        content: [{ type: "text" as const, text: errorMessage }],
-        details: { message: errorMessage },
-      };
+      return toolError(`Error: unknown action '${action}'. Valid actions: upsert, delete, read, list_versions, restore_version, help.`);
     },
   };
 }

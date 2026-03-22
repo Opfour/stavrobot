@@ -5,6 +5,7 @@ import type { ImageContent } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 import { log } from "./log.js";
+import { toolError, toolSuccess } from "./tool-result.js";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
 const TEXT_EXTENSIONS = new Set([".txt", ".md", ".csv", ".json", ".xml", ".html", ".css", ".js", ".ts", ".py", ".sh", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".log", ".sql", ".env"]);
@@ -74,19 +75,12 @@ export function createManageUploadsTool(): AgentTool {
       const action = raw.action;
 
       if (action === "help") {
-        return {
-          content: [{ type: "text" as const, text: MANAGE_UPLOADS_HELP_TEXT }],
-          details: { message: MANAGE_UPLOADS_HELP_TEXT },
-        };
+        return toolSuccess(MANAGE_UPLOADS_HELP_TEXT);
       }
 
       if (action === "read") {
         if (raw.path === undefined || raw.path.trim() === "") {
-          const errorMessage = "Error: path is required for read.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: path is required for read.");
         }
 
         const filePath = raw.path;
@@ -94,10 +88,7 @@ export function createManageUploadsTool(): AgentTool {
         const validationError = validatePath(filePath);
         if (validationError !== null) {
           log.warn("[stavrobot] manage_uploads read validation failed:", validationError);
-          return {
-            content: [{ type: "text" as const, text: validationError }],
-            details: { message: validationError },
-          };
+          return toolError(validationError);
         }
 
         const extension = path.extname(filePath).toLowerCase();
@@ -114,10 +105,7 @@ export function createManageUploadsTool(): AgentTool {
             }
             const message = `File not found: ${filePath}`;
             log.warn("[stavrobot] manage_uploads read error:", message);
-            return {
-              content: [{ type: "text" as const, text: message }],
-              details: { message },
-            };
+            return toolError(message);
           }
           const base64Data = buffer.toString("base64");
           const mimeType = inferMimeType(extension);
@@ -140,32 +128,19 @@ export function createManageUploadsTool(): AgentTool {
             }
             const message = `File not found: ${filePath}`;
             log.warn("[stavrobot] manage_uploads read error:", message);
-            return {
-              content: [{ type: "text" as const, text: message }],
-              details: { message },
-            };
+            return toolError(message);
           }
-          return {
-            content: [{ type: "text" as const, text: contents }],
-            details: { message: `Read ${contents.length} characters from ${filePath}.` },
-          };
+          return toolSuccess(contents);
         }
 
         const message = `Cannot read binary file directly. The file is stored at ${filePath} with type ${extension}.`;
         log.debug("[stavrobot] manage_uploads read: classified as unsupported binary:", extension);
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
       if (action === "delete") {
         if (raw.path === undefined || raw.path.trim() === "") {
-          const errorMessage = "Error: path is required for delete.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: path is required for delete.");
         }
 
         const filePath = raw.path;
@@ -173,10 +148,7 @@ export function createManageUploadsTool(): AgentTool {
         const validationError = validatePath(filePath);
         if (validationError !== null) {
           log.warn("[stavrobot] manage_uploads delete validation failed:", validationError);
-          return {
-            content: [{ type: "text" as const, text: validationError }],
-            details: { message: validationError },
-          };
+          return toolError(validationError);
         }
 
         try {
@@ -188,25 +160,13 @@ export function createManageUploadsTool(): AgentTool {
           }
           const message = `File not found: ${filePath}`;
           log.warn("[stavrobot] manage_uploads delete error:", message);
-          return {
-            content: [{ type: "text" as const, text: message }],
-            details: { message },
-          };
+          return toolError(message);
         }
 
-        const message = `File deleted: ${filePath}`;
-
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(`File deleted: ${filePath}`);
       }
 
-      const errorMessage = `Error: unknown action '${action}'. Valid actions: read, delete, help.`;
-      return {
-        content: [{ type: "text" as const, text: errorMessage }],
-        details: { message: errorMessage },
-      };
+      return toolError(`Error: unknown action '${action}'. Valid actions: read, delete, help.`);
     },
   };
 }

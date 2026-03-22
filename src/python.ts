@@ -5,6 +5,7 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 import { log } from "./log.js";
 import { internalFetch } from "./internal-fetch.js";
+import { toolError, toolSuccess } from "./tool-result.js";
 
 const PYTHON_RUNNER_URL = "http://python-runner:3003/run";
 const PYTHON_RUNNER_OUTPUT_DIR = path.join(TEMP_ATTACHMENTS_DIR, "python-runner");
@@ -45,7 +46,7 @@ export function createRunPythonTool(): AgentTool {
     execute: async (
       toolCallId: string,
       params: unknown,
-    ): Promise<AgentToolResult<{ result: string }>> => {
+    ): Promise<AgentToolResult<{ message: string }>> => {
       const { code, dependencies = [], files = [] } = params as {
         code: string;
         dependencies?: string[];
@@ -60,10 +61,7 @@ export function createRunPythonTool(): AgentTool {
         if (!resolvedPath.startsWith(resolvedTempDir + path.sep) && resolvedPath !== resolvedTempDir) {
           const errorMessage = `Error: file path is outside the allowed directory (${TEMP_ATTACHMENTS_DIR}): ${filePath}`;
           log.warn(`[stavrobot] run_python path validation failed: ${filePath}`);
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { result: errorMessage },
-          };
+          return toolError(errorMessage);
         }
         const data = await fs.readFile(resolvedPath);
         inputFiles.push({ filename: path.basename(resolvedPath), data: data.toString("base64") });
@@ -139,10 +137,7 @@ export function createRunPythonTool(): AgentTool {
         log.error(`[stavrobot] run_python fetch error: ${output}`);
       }
 
-      return {
-        content: [{ type: "text" as const, text: output }],
-        details: { result: output },
-      };
+      return toolSuccess(output);
     },
   };
 }

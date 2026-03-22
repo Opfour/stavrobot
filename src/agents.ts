@@ -8,6 +8,7 @@ import {
 } from "./database.js";
 import { encodeToToon } from "./toon.js";
 import { log } from "./log.js";
+import { toolError, toolSuccess } from "./tool-result.js";
 
 const SUBAGENT_TOOL_ALLOWLIST = new Set([
   "send_signal_message",
@@ -113,26 +114,15 @@ export function createManageAgentsTool(pool: pg.Pool): AgentTool {
       const { action } = raw;
 
       if (action === "help") {
-        return {
-          content: [{ type: "text" as const, text: HELP_TEXT }],
-          details: { message: HELP_TEXT },
-        };
+        return toolSuccess(HELP_TEXT);
       }
 
       if (action === "create") {
         if (raw.name === undefined || raw.name.trim() === "") {
-          const errorMessage = "Error: name is required for create.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: name is required for create.");
         }
         if (raw.system_prompt === undefined) {
-          const errorMessage = "Error: system_prompt is required for create.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: system_prompt is required for create.");
         }
 
         const allowedTools = raw.allowed_tools ?? [];
@@ -140,45 +130,26 @@ export function createManageAgentsTool(pool: pg.Pool): AgentTool {
 
         const invalidTools = validateAllowedTools(allowedTools);
         if (invalidTools.length > 0) {
-          const errorMessage = `Error: invalid allowed_tools entries: ${invalidTools.join(", ")}. Allowed tools: ${[...SUBAGENT_TOOL_ALLOWLIST].join(", ")}.`;
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(`Error: invalid allowed_tools entries: ${invalidTools.join(", ")}. Allowed tools: ${[...SUBAGENT_TOOL_ALLOWLIST].join(", ")}.`);
         }
 
         const invalidPlugins = validateAllowedPlugins(allowedPlugins);
         if (invalidPlugins.length > 0) {
-          const errorMessage = `Error: invalid allowed_plugins entries: ${invalidPlugins.join(", ")}. Each entry must be "*", a plugin name, or "pluginname.toolname".`;
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError(`Error: invalid allowed_plugins entries: ${invalidPlugins.join(", ")}. Each entry must be "*", a plugin name, or "pluginname.toolname".`);
         }
 
         const newId = await createAgentInDb(pool, raw.name.trim(), raw.system_prompt, allowedTools, allowedPlugins);
         const message = `Agent ${newId} created.`;
         log.info(`[stavrobot] ${message}`);
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
       if (action === "update") {
         if (raw.id === undefined) {
-          const errorMessage = "Error: id is required for update.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: id is required for update.");
         }
         if (raw.id === 1) {
-          const errorMessage = "Error: Cannot modify agent 1 (the main agent).";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: Cannot modify agent 1 (the main agent).");
         }
 
         const fields: { name?: string; systemPrompt?: string; allowedTools?: string[]; allowedPlugins?: string[] } = {};
@@ -196,58 +167,35 @@ export function createManageAgentsTool(pool: pg.Pool): AgentTool {
         }
 
         if (Object.keys(fields).length === 0) {
-          const errorMessage = "Error: no fields to update. Provide at least one of name, system_prompt, allowed_tools, or allowed_plugins.";
-          return {
-            content: [{ type: "text" as const, text: errorMessage }],
-            details: { message: errorMessage },
-          };
+          return toolError("Error: no fields to update. Provide at least one of name, system_prompt, allowed_tools, or allowed_plugins.");
         }
 
         if (fields.allowedTools !== undefined) {
           const invalidTools = validateAllowedTools(fields.allowedTools);
           if (invalidTools.length > 0) {
-            const errorMessage = `Error: invalid allowed_tools entries: ${invalidTools.join(", ")}. Allowed tools: ${[...SUBAGENT_TOOL_ALLOWLIST].join(", ")}.`;
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError(`Error: invalid allowed_tools entries: ${invalidTools.join(", ")}. Allowed tools: ${[...SUBAGENT_TOOL_ALLOWLIST].join(", ")}.`);
           }
         }
 
         if (fields.allowedPlugins !== undefined) {
           const invalidPlugins = validateAllowedPlugins(fields.allowedPlugins);
           if (invalidPlugins.length > 0) {
-            const errorMessage = `Error: invalid allowed_plugins entries: ${invalidPlugins.join(", ")}. Each entry must be "*", a plugin name, or "pluginname.toolname".`;
-            return {
-              content: [{ type: "text" as const, text: errorMessage }],
-              details: { message: errorMessage },
-            };
+            return toolError(`Error: invalid allowed_plugins entries: ${invalidPlugins.join(", ")}. Each entry must be "*", a plugin name, or "pluginname.toolname".`);
           }
         }
 
         await updateAgent(pool, raw.id, fields);
         const message = `Agent ${raw.id} updated.`;
         log.info(`[stavrobot] ${message}`);
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(message);
       }
 
       if (action === "list") {
         const agents = await listAgents(pool);
-        const message = encodeToToon(agents);
-        return {
-          content: [{ type: "text" as const, text: message }],
-          details: { message },
-        };
+        return toolSuccess(encodeToToon(agents));
       }
 
-      const errorMessage = `Error: unknown action '${action}'. Valid actions: help, create, update, list.`;
-      return {
-        content: [{ type: "text" as const, text: errorMessage }],
-        details: { message: errorMessage },
-      };
+      return toolError(`Error: unknown action '${action}'. Valid actions: help, create, update, list.`);
     },
   };
 }
