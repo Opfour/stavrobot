@@ -1141,11 +1141,11 @@ describe("escalatingSummarize", () => {
 
     expect(mockComplete).toHaveBeenCalledTimes(2);
     expect(result).toContain("[truncated due to compaction failure]");
-    // Level 3 truncates to 1500 chars of the input.
-    expect(result.startsWith(input.slice(0, 1500))).toBe(true);
+    // Level 3 must produce a result strictly shorter than the input.
+    expect(result.length).toBeLessThan(input.length);
   });
 
-  it("level 3 truncates input to 1500 characters", async () => {
+  it("level 3 result is strictly shorter than the input for a long input", async () => {
     const input = "X".repeat(3000);
     const bloated = "Y".repeat(input.length + 1);
     mockComplete
@@ -1154,7 +1154,24 @@ describe("escalatingSummarize", () => {
 
     const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
 
-    expect(result).toBe("X".repeat(1500) + "\n[truncated due to compaction failure]");
+    expect(result).toContain("[truncated due to compaction failure]");
+    expect(result.length).toBeLessThan(input.length);
+  });
+
+  it("level 3 result is strictly shorter than a short input (50 chars) when both LLM levels fail", async () => {
+    // With a 50-char input, the old code would produce 50 + 38 = 88 chars (longer than input).
+    // The fix must ensure the result is always strictly shorter than the input.
+    const input = "A".repeat(50);
+    const bloated = "B".repeat(input.length + 10);
+    mockComplete
+      .mockReturnValueOnce(makeCompleteResponse(bloated))
+      .mockReturnValueOnce(makeCompleteResponse(bloated));
+
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+
+    expect(mockComplete).toHaveBeenCalledTimes(2);
+    expect(result).toContain("[truncated due to compaction failure]");
+    expect(result.length).toBeLessThan(input.length);
   });
 
   it("replaces {target} placeholder in bullet prompt with computed token count", async () => {

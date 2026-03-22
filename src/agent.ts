@@ -1579,7 +1579,13 @@ export async function escalatingSummarize(
   // Level 3: deterministic truncation — no LLM call.
   log.info(`[stavrobot] Compaction level 2 failed (summary ${level2Text.length} chars >= input ${inputLength} chars), falling back to level 3 truncation.`);
 
-  return inputText.slice(0, 1500) + "\n[truncated due to compaction failure]";
+  const suffix = "\n[truncated due to compaction failure]";
+  // Guarantee the result is strictly shorter than the input. If the input is
+  // shorter than the suffix itself (an extreme edge case that should never
+  // occur in practice), just return the suffix — the input was tiny and
+  // shouldn't have triggered compaction.
+  const truncateLength = Math.max(0, inputLength - suffix.length - 1);
+  return inputText.slice(0, truncateLength) + suffix;
 }
 
 function formatDate(date: Date): string {
@@ -2240,6 +2246,17 @@ export async function handlePrompt(
 
         log.debug(`[stavrobot] [debug] Serialized input for summarizer (${serializedMessages.length} chars): ${serializedMessages.split("\n")[0]}`);
 
+        // Capture the maximum message id in the DB before summarization starts.
+        // Summarization can take several seconds, during which new messages may
+        // be inserted. Without this anchor, the OFFSET-based boundary query
+        // below could land on a message that was never part of the snapshot,
+        // setting upToMessageId past unsummarized messages.
+        const maxIdResult = await pool.query<{ max_id: number }>(
+          "SELECT MAX(id) as max_id FROM messages WHERE agent_id = $1",
+          [agentId],
+        );
+        const snapshotMaxId = maxIdResult.rows[0].max_id;
+
         const apiKey = await getApiKey(config);
         const summaryText = await escalatingSummarize(serializedMessages, config, agent.state.model, apiKey);
 
@@ -2249,12 +2266,12 @@ export async function handlePrompt(
         // The boundary must be the last compacted message id. loadMessages keeps
         // rows with id > upToMessageId, so using keepCount (not keepCount - 1)
         // preserves exactly messagesToKeep. The query is scoped to this agent
-        // so the boundary is correct even when multiple agents share the same
-        // messages table.
+        // and bounded by snapshotMaxId so the OFFSET only counts messages that
+        // existed when compaction started, not any inserted during summarization.
         const keepCount = messagesToKeep.length;
         const cutoffResult = await pool.query(
-          `SELECT id FROM messages WHERE agent_id = $1 AND id > $2 ORDER BY id DESC LIMIT 1 OFFSET ${keepCount}`,
-          [agentId, previousBoundary],
+          `SELECT id FROM messages WHERE agent_id = $1 AND id > $2 AND id <= $3 ORDER BY id DESC LIMIT 1 OFFSET ${keepCount}`,
+          [agentId, previousBoundary, snapshotMaxId],
         );
         if (cutoffResult.rows.length === 0) {
           log.warn("[stavrobot] Compaction skipped: no cutoff message found for computed boundary.");
