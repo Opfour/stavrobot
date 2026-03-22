@@ -21,6 +21,7 @@ function setupMocks(toml: string): void {
     if (path === "config.toml") return toml;
     if (path === "prompts/system-prompt.txt") return "You are a bot.";
     if (path === "prompts/compaction-prompt.txt") return "Compaction prompt.";
+    if (path === "prompts/compaction-bullet-prompt.txt") return "Bullet prompt. Target: {target} tokens maximum.";
     if (path === "prompts/agent-prompt.txt") return "You are Stavrobot.";
     throw new Error(`Unexpected readFileSync call: ${String(path)}`);
   });

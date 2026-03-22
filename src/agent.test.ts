@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, type MockedFunction } from "vitest";
+import { describe, it, expect, vi, type MockedFunction, beforeEach } from "vitest";
 import type { Agent, AgentMessage, AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { complete } from "@mariozechner/pi-ai";
 import type { Pool } from "pg";
-import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent } from "./agent.js";
+import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize } from "./agent.js";
 import { getApiKey } from "./auth.js";
 import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId } from "./database.js";
 import { runSearch } from "./search.js";
@@ -29,7 +30,6 @@ vi.mock("./database.js", () => ({
   resolveInterlocutorByName: vi.fn(),
   getMainAgentId: vi.fn(),
   loadAgent: vi.fn(),
-  COMPACTION_THRESHOLD: 40,
 }));
 vi.mock("./config.js", () => ({
   loadPostgresConfig: vi.fn().mockReturnValue({}),
@@ -1076,5 +1076,100 @@ describe("pendingAutoSearchBlocks — integration tests via handlePrompt and cre
       : JSON.stringify(lastUserMessage!.content);
     expect(contentText).not.toContain("turn 1 result");
     expect(contentText).not.toContain("Auto-search results");
+  });
+});
+
+describe("escalatingSummarize", () => {
+  const mockComplete = vi.mocked(complete);
+
+  const fakeModel = {} as Parameters<typeof escalatingSummarize>[2];
+  const fakeConfig = {
+    compactionPrompt: "Summarize this.",
+    compactionBulletPrompt: "Bullet points. Target: {target} tokens maximum.",
+  } as Parameters<typeof escalatingSummarize>[1];
+  const fakeApiKey = "test-api-key";
+
+  function makeCompleteResponse(text: string): ReturnType<typeof complete> {
+    return Promise.resolve({
+      content: [{ type: "text", text }],
+    } as Awaited<ReturnType<typeof complete>>);
+  }
+
+  beforeEach(() => {
+    mockComplete.mockReset();
+  });
+
+  it("returns level 1 summary when it is shorter than the input", async () => {
+    const input = "A".repeat(100);
+    const shortSummary = "Short summary.";
+    mockComplete.mockReturnValueOnce(makeCompleteResponse(shortSummary));
+
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+
+    expect(result).toBe(shortSummary);
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    // Level 1 uses the compaction prompt.
+    expect(mockComplete.mock.calls[0][1].systemPrompt).toBe(fakeConfig.compactionPrompt);
+  });
+
+  it("falls back to level 2 when level 1 summary is not shorter than the input", async () => {
+    const input = "A long enough input string.";
+    const bloatedSummary = "A".repeat(input.length + 10);
+    const bulletSummary = "- fact";
+    mockComplete
+      .mockReturnValueOnce(makeCompleteResponse(bloatedSummary))
+      .mockReturnValueOnce(makeCompleteResponse(bulletSummary));
+
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+
+    expect(result).toBe(bulletSummary);
+    expect(mockComplete).toHaveBeenCalledTimes(2);
+    // Level 2 uses the bullet prompt with {target} replaced.
+    const level2Prompt = mockComplete.mock.calls[1][1].systemPrompt as string;
+    expect(level2Prompt).not.toContain("{target}");
+    expect(level2Prompt).toContain("tokens maximum");
+  });
+
+  it("falls back to level 3 truncation when both LLM levels fail to shorten", async () => {
+    const input = "A".repeat(200);
+    const bloated = "B".repeat(input.length + 10);
+    mockComplete
+      .mockReturnValueOnce(makeCompleteResponse(bloated))
+      .mockReturnValueOnce(makeCompleteResponse(bloated));
+
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+
+    expect(mockComplete).toHaveBeenCalledTimes(2);
+    expect(result).toContain("[truncated due to compaction failure]");
+    // Level 3 truncates to 1500 chars of the input.
+    expect(result.startsWith(input.slice(0, 1500))).toBe(true);
+  });
+
+  it("level 3 truncates input to 1500 characters", async () => {
+    const input = "X".repeat(3000);
+    const bloated = "Y".repeat(input.length + 1);
+    mockComplete
+      .mockReturnValueOnce(makeCompleteResponse(bloated))
+      .mockReturnValueOnce(makeCompleteResponse(bloated));
+
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+
+    expect(result).toBe("X".repeat(1500) + "\n[truncated due to compaction failure]");
+  });
+
+  it("replaces {target} placeholder in bullet prompt with computed token count", async () => {
+    // Input of 300 chars → ~100 estimated tokens → target = 50.
+    const input = "A".repeat(300);
+    const bloated = "B".repeat(input.length + 1);
+    const bulletSummary = "- item";
+    mockComplete
+      .mockReturnValueOnce(makeCompleteResponse(bloated))
+      .mockReturnValueOnce(makeCompleteResponse(bulletSummary));
+
+    await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+
+    const level2Prompt = mockComplete.mock.calls[1][1].systemPrompt as string;
+    // 300 chars / 3 / 2 = 50 tokens target.
+    expect(level2Prompt).toContain("50");
   });
 });

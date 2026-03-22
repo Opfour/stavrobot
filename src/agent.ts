@@ -1,13 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
-import { Type, getModel, type TextContent, type ImageContent, type AssistantMessage, type ToolCall, type ThinkingContent, complete } from "@mariozechner/pi-ai";
+import { Type, getModel, type TextContent, type ImageContent, type AssistantMessage, type ToolCall, type ThinkingContent, complete, type Api, type Model } from "@mariozechner/pi-ai";
 import { Agent, type AgentTool, type AgentToolResult, type AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Config } from "./config.js";
 import { isInAllowlist } from "./allowlist.js";
 import type { FileAttachment } from "./uploads.js";
 import { getApiKey } from "./auth.js";
-import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, upsertScratchpad, deleteScratchpad, readScratchpad, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, loadAllScratchpadTitles, resolveRecipient, resolveInterlocutorByName, getMainAgentId, loadAgent, COMPACTION_THRESHOLD, type Memory } from "./database.js";
+import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, upsertScratchpad, deleteScratchpad, readScratchpad, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, loadAllScratchpadTitles, resolveRecipient, resolveInterlocutorByName, getMainAgentId, loadAgent, type Memory } from "./database.js";
 import type { RoutingResult } from "./queue.js";
 import { reloadScheduler } from "./scheduler.js";
 import { createManagePluginsTool, createRunPluginToolTool, createRequestCodingTaskTool } from "./plugin-tools.js";
@@ -1200,7 +1200,7 @@ function estimateBlockTokens(block: TextContent | ImageContent | ThinkingContent
   return JSON.stringify(block.arguments).length / CHARS_PER_TOKEN;
 }
 
-function estimateTokens(messages: AgentMessage[]): number {
+export function estimateTokens(messages: AgentMessage[]): number {
   let total = 0;
   for (const message of messages) {
     if (message.role === "user") {
@@ -1499,6 +1499,87 @@ export function serializeMessagesForSummary(messages: AgentMessage[]): string {
   }
 
   return lines.join("\n");
+}
+
+export async function escalatingSummarize(
+  inputText: string,
+  config: Config,
+  model: Model<Api>,
+  apiKey: string,
+): Promise<string> {
+  const inputLength = inputText.length;
+
+  // Level 1: use the existing compaction prompt.
+  const level1Response = await complete(
+    model,
+    {
+      systemPrompt: config.compactionPrompt,
+      messages: [
+        {
+          role: "user" as const,
+          content: [
+            "Summarize the conversation inside <conversation> tags according to your system instructions.",
+            "",
+            "<conversation>",
+            inputText,
+            "</conversation>",
+          ].join("\n"),
+          timestamp: Date.now(),
+        },
+      ],
+    },
+    { apiKey, temperature: 0.1 },
+  );
+
+  const level1Text = level1Response.content
+    .filter((block): block is TextContent => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+
+  if (level1Text.length < inputLength) {
+    return level1Text;
+  }
+
+  // Level 2: bullet-point prompt targeting half the input's estimated token count.
+  const targetTokens = Math.round(inputLength / 3 / 2);
+  log.info(`[stavrobot] Compaction level 1 failed (summary ${level1Text.length} chars >= input ${inputLength} chars), attempting level 2 bullet-point summary (target: ${targetTokens} tokens).`);
+
+  const bulletPrompt = config.compactionBulletPrompt.replace("{target}", String(targetTokens));
+
+  const level2Response = await complete(
+    model,
+    {
+      systemPrompt: bulletPrompt,
+      messages: [
+        {
+          role: "user" as const,
+          content: [
+            "Summarize the conversation inside <conversation> tags according to your system instructions.",
+            "",
+            "<conversation>",
+            inputText,
+            "</conversation>",
+          ].join("\n"),
+          timestamp: Date.now(),
+        },
+      ],
+    },
+    { apiKey, temperature: 0.1 },
+  );
+
+  const level2Text = level2Response.content
+    .filter((block): block is TextContent => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+
+  if (level2Text.length < inputLength) {
+    return level2Text;
+  }
+
+  // Level 3: deterministic truncation — no LLM call.
+  log.info(`[stavrobot] Compaction level 2 failed (summary ${level2Text.length} chars >= input ${inputLength} chars), falling back to level 3 truncation.`);
+
+  return inputText.slice(0, 1500) + "\n[truncated due to compaction failure]";
 }
 
 function formatDate(date: Date): string {
@@ -2099,29 +2180,52 @@ export async function handlePrompt(
         .join("")
     : "";
 
-  if (agent.state.messages.length > COMPACTION_THRESHOLD && !compactionInProgress) {
+  if (estimateTokens(agent.state.messages) > config.compactionTokenThreshold && !compactionInProgress) {
     compactionInProgress = true;
     // Snapshot the messages now so the background task works on a stable slice
     // and never touches agent.state.messages directly.
     const currentMessages = agent.state.messages.slice();
 
-    log.debug(`[stavrobot] [debug] Compaction triggered: ${currentMessages.length} messages in memory`);
+    log.debug(`[stavrobot] [debug] Compaction triggered: ${currentMessages.length} messages, ~${Math.round(estimateTokens(currentMessages))} estimated tokens`);
 
     void (async () => {
       try {
+        // Walk backward from the end of currentMessages, accumulating estimated tokens,
+        // until we exceed 50% of the compaction threshold. This keeps roughly half the
+        // threshold worth of recent messages, so the post-compaction context is well
+        // below the trigger and won't immediately re-trigger compaction.
+        const keepTokenBudget = config.compactionTokenThreshold * 0.5;
+        let accumulatedTokens = 0;
+        let cutIndex = currentMessages.length;
+        for (let i = currentMessages.length - 1; i >= 0; i--) {
+          const messageTokens = estimateTokens([currentMessages[i]]);
+          if (accumulatedTokens + messageTokens > keepTokenBudget) {
+            cutIndex = i + 1;
+            break;
+          }
+          accumulatedTokens += messageTokens;
+          cutIndex = i;
+        }
+
+        // If the total estimated tokens of all messages are below the keep budget,
+        // there is nothing worth compacting.
+        if (cutIndex === 0) {
+          log.warn("[stavrobot] Compaction skipped: all messages fit within the keep budget, nothing to compact.");
+          return;
+        }
+
         // Advance the cut point to the next user message. A user message is always a
         // safe compaction boundary: it is never part of a tool-use/tool-result pair and
         // is never stripped by the library's transformMessages. Landing on an assistant
         // message risks orphaning a toolResult that follows it, which the Anthropic API
         // rejects with a 400 error.
-        let cutIndex = currentMessages.length - 20;
         while (cutIndex < currentMessages.length && currentMessages[cutIndex].role !== "user") {
           cutIndex++;
         }
 
-        // If no user message was found in the tail window, skip compaction for this turn.
+        // If no user message was found after the token-based cut point, skip compaction for this turn.
         if (cutIndex >= currentMessages.length) {
-          log.warn("[stavrobot] Compaction skipped: no user message found in tail window, no safe cut point found.");
+          log.warn("[stavrobot] Compaction skipped: no user message found after token-based cut point, no safe cut point found.");
           return;
         }
 
@@ -2136,34 +2240,8 @@ export async function handlePrompt(
 
         log.debug(`[stavrobot] [debug] Serialized input for summarizer (${serializedMessages.length} chars): ${serializedMessages.split("\n")[0]}`);
 
-        const summarySystemPrompt = config.compactionPrompt;
-
         const apiKey = await getApiKey(config);
-        const response = await complete(
-          agent.state.model,
-          {
-            systemPrompt: summarySystemPrompt,
-            messages: [
-              {
-                role: "user" as const,
-                content: [
-                  "Summarize the conversation inside <conversation> tags according to your system instructions.",
-                  "",
-                  "<conversation>",
-                  serializedMessages,
-                  "</conversation>",
-                ].join("\n"),
-                timestamp: Date.now(),
-              },
-            ],
-          },
-          { apiKey, temperature: 0.1 }
-        );
-
-        const summaryText = response.content
-          .filter((block): block is TextContent => block.type === "text")
-          .map((block) => block.text)
-          .join("");
+        const summaryText = await escalatingSummarize(serializedMessages, config, agent.state.model, apiKey);
 
         const previousCompaction = await loadLatestCompaction(pool, agentId);
         const previousBoundary = previousCompaction ? previousCompaction.upToMessageId : 0;

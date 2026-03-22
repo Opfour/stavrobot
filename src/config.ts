@@ -4,6 +4,7 @@ import { log } from "./log.js";
 
 const SYSTEM_PROMPT_PATH = "prompts/system-prompt.txt";
 const COMPACTION_PROMPT_PATH = "prompts/compaction-prompt.txt";
+const COMPACTION_BULLET_PROMPT_PATH = "prompts/compaction-bullet-prompt.txt";
 const AGENT_PROMPT_PATH = "prompts/agent-prompt.txt";
 
 export interface PostgresConfig {
@@ -62,8 +63,10 @@ export interface Config {
   password?: string;
   baseSystemPrompt: string;
   compactionPrompt: string;
+  compactionBulletPrompt: string;
   baseAgentPrompt: string;
   customPrompt?: string;
+  compactionTokenThreshold: number;
   coder?: CoderConfig;
   embeddings?: EmbeddingsConfig;
   signal?: SignalConfig;
@@ -84,8 +87,15 @@ export function loadConfig(): Config {
   log.info(`[stavrobot] Loading compaction prompt from ${COMPACTION_PROMPT_PATH}`);
   config.compactionPrompt = fs.readFileSync(COMPACTION_PROMPT_PATH, "utf-8").trimEnd();
 
+  log.info(`[stavrobot] Loading compaction bullet prompt from ${COMPACTION_BULLET_PROMPT_PATH}`);
+  config.compactionBulletPrompt = fs.readFileSync(COMPACTION_BULLET_PROMPT_PATH, "utf-8").trimEnd();
+
   log.info(`[stavrobot] Loading agent prompt from ${AGENT_PROMPT_PATH}`);
   config.baseAgentPrompt = fs.readFileSync(AGENT_PROMPT_PATH, "utf-8").trimEnd();
+
+  if (config.compactionTokenThreshold === undefined) {
+    config.compactionTokenThreshold = 60000;
+  }
 
   if (config.apiKey === undefined && config.authFile === undefined) {
     throw new Error("Config must specify either apiKey or authFile.");

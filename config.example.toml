@@ -22,6 +22,11 @@ authFile = "/app/data/auth.json"
 # The public HTTPS URL where this server is reachable (no trailing slash).
 publicHostname = "https://example.com"
 
+# Estimated token count at which conversation history is compacted into a summary.
+# Uses a character/3 heuristic. Increase to keep more history in context; decrease
+# to compact sooner and reduce API costs.
+# compactionTokenThreshold = 60000
+
 # Optional additional instructions appended to the base system prompt.
 # The base prompt is in system-prompt.txt and always applies.
 customPrompt = """

@@ -3,7 +3,7 @@ import { Type } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { EmbeddingsConfig } from "./config.js";
 import { fetchEmbeddings, extractText } from "./embeddings.js";
-import { getMainAgentId, COMPACTION_THRESHOLD } from "./database.js";
+import { getMainAgentId, loadLatestCompaction } from "./database.js";
 import { encodeToToon } from "./toon.js";
 import { log } from "./log.js";
 
@@ -31,10 +31,6 @@ interface MessageRow {
   role: string;
   content: unknown;
   created_at: Date;
-}
-
-interface CutoffRow {
-  id: number;
 }
 
 export interface RankedMessage {
@@ -138,40 +134,39 @@ export async function runSearch(
     }
   }
 
-  // Compute the cutoff message id: the id of the message at position
-  // COMPACTION_THRESHOLD from the newest end (i.e. the oldest message still
-  // inside the recent window). Messages with id >= cutoffId are excluded from
-  // search so the agent is not shown results it already has in context.
-  const cutoffResult = await pool.query<CutoffRow>(
-    `SELECT id
-     FROM messages
-     WHERE agent_id = $1
-     ORDER BY id DESC
-     OFFSET $2
-     LIMIT 1`,
-    [mainAgentId, COMPACTION_THRESHOLD - 1],
-  );
+  // Load the latest compaction to determine which messages are already in the
+  // agent's active context. Messages with id > compaction.upToMessageId are
+  // still in context and are excluded from search results to avoid redundancy.
+  // When no compaction exists, all messages are in context but search is still
+  // useful, so no exclusion is applied.
+  const compaction = await loadLatestCompaction(pool, mainAgentId);
 
-  // If fewer than COMPACTION_THRESHOLD messages exist, there is no older
-  // portion to search — return no message hits.
-  if (cutoffResult.rows.length === 0) {
-    log.debug("[stavrobot] search: fewer than threshold messages, returning no message hits");
-    return { tableResults: capTableResults(tableResults), messages: [], queryEmbedding: undefined };
+  // Build the optional upper-bound clause. When a compaction exists, restrict
+  // to messages at or before the compaction boundary (those are the archived
+  // messages no longer in the active context window).
+  const compactionClause = compaction !== null ? "AND m.id <= $4" : "";
+  const compactionParam = compaction !== null ? compaction.upToMessageId : null;
+
+  if (compaction !== null) {
+    log.debug(`[stavrobot] search: excluding messages with id > ${compaction.upToMessageId} (still in active context)`);
+  } else {
+    log.debug("[stavrobot] search: no compaction found, searching all messages");
   }
-
-  const cutoffId = cutoffResult.rows[0].id;
 
   // Full-text search on messages. We extract only the text parts from the
   // JSONB content to avoid hitting Postgres's 1MB tsvector limit that would
   // be triggered by casting the whole blob (which includes metadata, model
   // info, usage stats, etc.). User messages may store their inner content as
   // a plain string; assistant messages store it as an array of typed parts.
+  const fullTextParams: unknown[] = compaction !== null
+    ? [query, limit, mainAgentId, compactionParam]
+    : [query, limit, mainAgentId];
   const fullTextResult = await pool.query<MessageRow>(
     `SELECT m.id, m.role, m.content, m.created_at
      FROM messages m
      WHERE m.role IN ('user', 'assistant')
        AND m.agent_id = $3
-       AND m.id < $4
+       ${compactionClause}
        AND to_tsvector('english',
          CASE
            WHEN jsonb_typeof(m.content->'content') = 'string' THEN m.content->>'content'
@@ -185,7 +180,7 @@ export async function runSearch(
        ) @@ plainto_tsquery('english', $1)
      ORDER BY m.created_at DESC
      LIMIT $2`,
-    [query, limit, mainAgentId, cutoffId],
+    fullTextParams,
   );
   log.debug(`[stavrobot] search: messages full-text returned ${fullTextResult.rows.length} match(es)`);
 
@@ -207,16 +202,19 @@ export async function runSearch(
       queryEmbedding = embeddings[0];
       const queryVector = `[${queryEmbedding.join(",")}]`;
 
+      const semanticParams: unknown[] = compaction !== null
+        ? [queryVector, limit, mainAgentId, compactionParam]
+        : [queryVector, limit, mainAgentId];
       const semanticResult = await pool.query<MessageRow>(
         `SELECT m.id, m.role, m.content, m.created_at
          FROM messages m
          JOIN message_embeddings me ON me.message_id = m.id
          WHERE m.role IN ('user', 'assistant')
            AND m.agent_id = $3
-           AND m.id < $4
+           ${compactionClause}
          ORDER BY me.embedding <=> $1
          LIMIT $2`,
-        [queryVector, limit, mainAgentId, cutoffId],
+        semanticParams,
       );
       log.debug(`[stavrobot] search: messages semantic returned ${semanticResult.rows.length} match(es)`);
 

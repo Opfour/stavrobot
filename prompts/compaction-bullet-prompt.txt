@@ -1,0 +1,1 @@
+Summarize the conversation into a flat bullet-point list. Each bullet should be one line capturing a single fact, decision, or pending item. Include specific IDs, names, dates, and values. Omit all small talk, acknowledgments, and narrative. Target: {target} tokens maximum.
