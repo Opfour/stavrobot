@@ -20,7 +20,7 @@ Pages are served at /pages/<path>.
 
 On an existing page, omit any field to keep its current value. On a new page, content and mimetype are required.
 
-The queries parameter maps query names to SQL strings (SELECT/WITH only). Use $param:name placeholders for parameters the client supplies via query string. Page JS fetches data via GET /api/pages/<path>/queries/<name>?param1=value1. The response is a JSON array of row objects. For private pages the endpoint requires authentication (the browser is already authenticated by the page load); for public pages no authentication is needed.
+The queries parameter maps query names to SQL strings (SELECT/WITH only). Use $param:name placeholders for parameters the client supplies via query string. Page JS fetches data via GET /api/pages/<path>/queries/<name>?param1=value1. The response is a JSON array of row objects. Query endpoints inherit the page's visibility: public pages have public query endpoints (no auth needed), private pages have private query endpoints (auth required; the browser is already authenticated by the page load).
 
 Security constraint: NEVER set is_public to true unless the user has *explicitly* and *unambiguously* said they want THIS SPECIFIC PAGE publicly accessible. Default to false. Only set true if the user says something clearly intentional such as "make this page public". When in doubt, keep it private.
 
