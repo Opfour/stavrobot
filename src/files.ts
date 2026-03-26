@@ -12,7 +12,7 @@ const HELP_TEXT = `manage_files: manage files in a temporary directory (${FILES_
 
 Actions:
 - write: write content to a file. Parameters: filename (required), content (required), encoding ("utf-8" default or "base64").
-- read: read a file's content as utf-8 text. Parameters: filename (required).
+- read: read a file's content as utf-8 text. Parameters: filename (required). Also accepts an absolute path under ${TEMP_ATTACHMENTS_DIR} (e.g. a plugin output file path).
 - list: list all files in the directory. Returns absolute paths, one per line.
 - delete: delete a file. Parameters: filename (required).
 - help: show this help text.
@@ -43,7 +43,7 @@ export function createManageFilesTool(): AgentTool {
         Type.Literal("delete"),
         Type.Literal("help"),
       ], { description: "Action to perform: write, read, list, delete, or help." }),
-      filename: Type.Optional(Type.String({ description: "Filename (no path separators). Required for write, read, and delete." })),
+      filename: Type.Optional(Type.String({ description: "Filename (no path separators) for write/delete, or a filename or absolute path for read. Required for write, read, and delete." })),
       content: Type.Optional(Type.String({ description: "File content. Required for write." })),
       encoding: Type.Optional(Type.String({ description: "Encoding for write: 'utf-8' (default) or 'base64'." })),
     }),
@@ -112,12 +112,23 @@ export function createManageFilesTool(): AgentTool {
         if (raw.filename === undefined || raw.filename.trim() === "") {
           return toolError("Error: filename is required for read.");
         }
-        const filenameError = validateFilename(raw.filename);
-        if (filenameError !== null) {
-          return toolError(filenameError);
+
+        let filePath: string;
+        if (path.isAbsolute(raw.filename)) {
+          // Absolute path: allow reading any file under the temp attachments root
+          // (e.g. plugin output files at /tmp/stavrobot-temp/web-get/foo.txt).
+          filePath = path.resolve(raw.filename);
+          if (!filePath.startsWith(TEMP_ATTACHMENTS_DIR + path.sep) && filePath !== TEMP_ATTACHMENTS_DIR) {
+            return toolError(`Error: path must be under ${TEMP_ATTACHMENTS_DIR}.`);
+          }
+        } else {
+          const filenameError = validateFilename(raw.filename);
+          if (filenameError !== null) {
+            return toolError(filenameError);
+          }
+          filePath = path.join(FILES_DIR, raw.filename);
         }
 
-        const filePath = path.join(FILES_DIR, raw.filename);
         const fileContent = await fs.readFile(filePath, "utf-8");
         log.debug(`[stavrobot] manage_files read: ${filePath} (${fileContent.length} chars)`);
         return toolSuccess(fileContent);

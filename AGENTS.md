@@ -290,3 +290,5 @@ changes.  This file is the plugin authoring guide used by the coder agent.
   discussion with the user, record it in `DECISIONLOG.md` at the project root. Only
   record decisions that come from user discussion, not decisions you make yourself. Update
   this file whenever a new decision is implemented.
+- When finishing a feature, think whether any non-obvious decisions should be put in
+  DECISIONLOG.md or in comments in the code.
