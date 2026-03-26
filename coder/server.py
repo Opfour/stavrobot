@@ -198,6 +198,8 @@ def run_coding_task(task_id: str, message: str, plugin: str) -> None:
             "SHELL": "/bin/bash",
             "UV_CACHE_DIR": f"/cache/{plugin}/uv",
             "UV_PYTHON_INSTALL_DIR": "/opt/uv/python",
+            "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+            "REQUESTS_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
         }
 
         print(f"[stavrobot-coder] Running as uid={uid} gid={gid} in {cwd}")
