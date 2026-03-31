@@ -24,7 +24,7 @@ The queries parameter maps query names to SQL strings (SELECT/WITH only). Use $p
 
 Security constraint: NEVER set is_public to true unless the user has *explicitly* and *unambiguously* said they want THIS SPECIFIC PAGE publicly accessible. Default to false. Only set true if the user says something clearly intentional such as "make this page public". When in doubt, keep it private.
 
-Static page model: pages are entirely static. The content string is served byte-for-byte as the HTTP response body. There is no server-side rendering, no templating engine, no data injection. Do not assume any server-provided variables like window.__PAGE_DATA__ exist — they don't. All dynamic data must be loaded client-side via JavaScript fetch calls to the query API.
+Static page model: pages are entirely static. The content string is served byte-for-byte as the HTTP response body. There is no server-side rendering, no templating engine, no data injection. Pages only respond to GET requests — they cannot receive POST requests or act as webhook endpoints. Do not assume any server-provided variables like window.__PAGE_DATA__ or $request exist — they don't. All dynamic data must be loaded client-side via JavaScript fetch calls to the query API.
 
 Data fetching pattern:
 
