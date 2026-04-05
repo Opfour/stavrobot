@@ -14,7 +14,7 @@ arbitrary scripts in isolated Unix user accounts.
 | `postgres` | `pgvector/pgvector:pg17` | internal | Primary database (with pgvector extension) |
 | `app` | `./Dockerfile` | 10567→3000 | Main HTTP server + LLM agent |
 | `plugin-runner` | `./plugin-runner` | internal:3003 | Executes plugin scripts |
-| `coder` | `./coder` | internal:3002 | Runs `claude -p` for plugin authoring |
+| `coder` | `./coder` | internal:3002 | Runs `claude -p` for plugin authoring (optional, `coder` profile) |
 | `python-runner` | `./python-runner` | internal | Executes Python snippets |
 | `pg-backup` | `pgvector/pgvector:pg17` | — | Hourly pg_dump to `./data/db-backups` |
 | `signal-bridge` | `./signal-bridge` | internal:8081 | Signal protocol bridge (optional profile) |
@@ -332,7 +332,7 @@ is supported with a custom endpoint).
   `PGPASSWORD`, `PGDATABASE`).
 - Log level: `STAVROBOT_LOG_LEVEL` env var (`error`/`warn`/`info`/`debug`; default `info`).
 - Feature gates in `config.toml` (presence of section enables the feature):
-  - `[coder]` — enables `request_coding_task` tool and `manage_plugins create` action.
+  - `[coder]` — enables `request_coding_task` tool and `manage_plugins create` action (also requires the `coder` Docker Compose profile).
   - `[telegram]` — enables Telegram webhook + `send_telegram_message` tool.
   - `[whatsapp]` — enables WhatsApp (Baileys) + `send_whatsapp_message` tool.
   - `[email]` with `smtpHost` — enables `send_email` tool and SMTP transport.

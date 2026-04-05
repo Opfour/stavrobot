@@ -58,12 +58,15 @@ The app supports two authentication modes: API key or OAuth.
 
 ### Claude Code setup
 
-The `coder` container uses Claude Code with subscription auth (OAuth), separate from the main app's API key.
+The `coder` container is optional (needed only for the self-programming feature). It uses Claude Code with subscription auth (OAuth), separate from the main app's API key.
 
-1. Start the containers: `docker compose up --build`
-2. Log in: `docker compose exec -u coder coder claude` (it will prompt you to log in if you haven't).
-3. Follow the browser-based OAuth flow.
-4. Set `[coder].model` in your config to a Claude Code model alias (`sonnet`, `opus`, or `haiku`).
+Docker Compose profiles are comma-separated, so you can combine them (e.g. `COMPOSE_PROFILES=signal,coder`).
+
+1. Set `COMPOSE_PROFILES` in your `.env` file to include `coder` (e.g. `COMPOSE_PROFILES=coder`, or `COMPOSE_PROFILES=signal,coder` if you are also using Signal).
+2. Start the containers: `docker compose --profile coder up --build`
+3. Log in: `docker compose exec -u coder coder claude` (it will prompt you to log in if you haven't).
+4. Follow the browser-based OAuth flow.
+5. Set `[coder].model` in your config to a Claude Code model alias (`sonnet`, `opus`, or `haiku`).
 
 ### Signal setup
 
@@ -238,7 +241,7 @@ https://github.com/orgs/stavrobot/repositories
 
 ## Architecture
 
-Four Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3000, handles Telegram webhooks at `POST /telegram/webhook`, handles inbound email webhooks at `POST /email/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed), and `coder` (Claude Code headless agent for creating and modifying editable plugins). The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
+Three core Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3000, handles Telegram webhooks at `POST /telegram/webhook`, handles inbound email webhooks at `POST /email/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), and `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed). An optional `coder` container (Claude Code headless agent for creating and modifying editable plugins) is enabled via the `coder` Docker Compose profile. The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
 
 ## License
 

@@ -562,11 +562,15 @@ export function createRequestCodingTaskTool(): AgentTool {
 
       const taskId = crypto.randomUUID();
       log.debug("[stavrobot] request_coding_task submitting: taskId", taskId, "plugin:", plugin, "message:", message);
-      await internalFetch(`${CLAUDE_CODE_BASE_URL}/code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId, plugin, message }),
-      });
+      try {
+        await internalFetch(`${CLAUDE_CODE_BASE_URL}/code`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId, plugin, message }),
+        });
+      } catch {
+        return toolSuccess("The coder container is not reachable. Make sure the 'coder' Docker Compose profile is enabled and the container is running.");
+      }
       return toolSuccess(`Coding task ${taskId} submitted for plugin '${plugin}'. The coder agent will respond when done.`);
     },
   };

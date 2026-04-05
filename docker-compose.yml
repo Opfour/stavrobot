@@ -67,6 +67,7 @@ services:
 
   coder:
     build: ./coder
+    profiles: ["coder"]
     environment:
       TZ: ${TZ:-UTC}
     restart: unless-stopped

@@ -30,6 +30,7 @@ services:
       - {{ HM_DATA_DIR }}/plugins:/plugins
       - {{ HM_CACHE_DIR }}/plugins:/cache
   coder:
+    profiles: ["coder"]
     volumes:
       - {{ HM_DATA_DIR }}/main:/root/config:ro
       - {{ HM_DATA_DIR }}/coder:/home/coder/.claude
