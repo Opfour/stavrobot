@@ -26,7 +26,7 @@ It has all the nice features of an AI assistant, but focuses on sandboxing, isol
 
 **Manual install:**
 
-1. Message [@BotFather](https://t.me/BotFather) on Telegram to create a bot and copy the token. Message [@userinfobot](https://t.me/userinfobot) to get your chat ID.
+1. Message [@BotFather](https://t.me/BotFather) on Telegram to create a bot and copy the token. Message [@userinfobot](https://t.me/userinfobot) to get your Telegram user ID (this is used as the chat ID).
 2. Copy `env.example` to `.env` and **change `POSTGRES_PASSWORD`** to something secure and `TZ` to your timezone.
 3. Copy `config.example.toml` to `data/main/config.toml` and fill in the required fields: `apiKey`, `password`, `publicHostname`, `[owner].name`, `[owner].telegram` (your chat ID), and `[telegram].botToken`. Everything else in the file is optional.
 
@@ -89,7 +89,7 @@ Signal requires a **separate phone number** — not your personal one. A prepaid
 ### Telegram setup
 
 1. Message @BotFather on Telegram, create a new bot, and copy the token.
-2. Message @userinfobot on Telegram to get your chat ID.
+2. Message @userinfobot on Telegram to get your user ID (this is used as the chat ID).
 3. Set `[telegram].botToken` in your config.
 4. After first startup, add allowed chat IDs via the `/settings` web UI.
 5. The webhook is registered automatically when the app starts.
