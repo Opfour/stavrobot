@@ -242,7 +242,7 @@ https://github.com/orgs/stavrobot/repositories
 
 ## Architecture
 
-Three core Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3000, handles Telegram webhooks at `POST /telegram/webhook`, handles inbound email webhooks at `POST /email/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), and `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed). An optional `coder` container (Claude Code headless agent for creating and modifying editable plugins) is enabled via the `coder` Docker Compose profile. The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
+Three core Docker containers: `app` (TypeScript server, exposes `POST /chat`, handles Telegram webhooks at `POST /telegram/webhook`, handles inbound email webhooks at `POST /email/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), and `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed). An optional `coder` container (Claude Code headless agent for creating and modifying editable plugins) is enabled via the `coder` Docker Compose profile. The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
 
 ## License
 
