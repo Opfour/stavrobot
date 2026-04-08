@@ -90,6 +90,32 @@ export async function getApiKey(config: Config): Promise<string> {
   throw new AuthError(`OAuth token refresh failed after ${MAX_RETRIES} attempts: ${finalMessage}`);
 }
 
+// Removes the provider's credentials from the auth file so that subsequent
+// calls to getApiKey() don't keep returning a revoked token. Called when the
+// API responds with a 401, which means the stored token is no longer valid.
+export function invalidateCredentials(config: Config): void {
+  if (config.apiKey !== undefined) {
+    // Static API key — nothing to invalidate.
+    return;
+  }
+
+  const authFile = config.authFile as string;
+
+  let credentials: CredentialsMap;
+  try {
+    credentials = JSON.parse(fs.readFileSync(authFile, "utf-8")) as CredentialsMap;
+  } catch (readError) {
+    if (readError instanceof Error && (readError as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+    throw readError;
+  }
+
+  delete credentials[config.provider];
+  fs.writeFileSync(authFile, JSON.stringify(credentials, null, 2));
+  log.info(`[stavrobot] Invalidated credentials for provider "${config.provider}".`);
+}
+
 export function startBackgroundTokenRefresh(config: Config): void {
   if (config.apiKey !== undefined) {
     return;

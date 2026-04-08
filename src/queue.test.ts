@@ -2,12 +2,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type pg from "pg";
 import type { Agent } from "@mariozechner/pi-agent-core";
 import type { Config } from "./config.js";
-import { AuthError } from "./auth.js";
+import { AuthError, invalidateCredentials } from "./auth.js";
 import { AbortError } from "./errors.js";
 import type { RoutingResult } from "./queue.js";
 import { parseProviderErrorMessage } from "./queue.js";
 
 // Mock the modules that processQueue depends on so tests don't need real infrastructure.
+vi.mock("./auth.js", () => ({
+  AuthError: class AuthError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "AuthError";
+    }
+  },
+  invalidateCredentials: vi.fn(),
+}));
 vi.mock("./agent/index.js", () => ({
   handlePrompt: vi.fn(),
   formatUserMessage: vi.fn((message: string, source?: string) => `[${source ?? "cli"}] ${message}`),
@@ -40,6 +49,7 @@ import { sendTelegramMessage } from "./telegram-api.js";
 import { sendWhatsappTextMessage } from "./whatsapp-api.js";
 import { initializeQueue, enqueueMessage, MAX_RETRIES } from "./queue.js";
 
+const mockInvalidateCredentials = vi.mocked(invalidateCredentials);
 const mockHandlePrompt = vi.mocked(handlePrompt);
 const mockFormatUserMessage = vi.mocked(formatUserMessage);
 const mockGetMainAgentId = vi.mocked(getMainAgentId);
@@ -146,6 +156,19 @@ describe("processQueue non-retryable 400 error handling", () => {
 
     expect(result).toContain("Authentication required");
     expect(mockHandlePrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves with the auth message, invalidates credentials, and does not retry on a 401 API error", async () => {
+    mockHandlePrompt.mockRejectedValueOnce(
+      new Error('Agent error: "401 {"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"}}"'),
+    );
+
+    const result = await enqueueMessage("hello");
+
+    expect(result).toContain("Authentication required");
+    expect(mockHandlePrompt).toHaveBeenCalledTimes(1);
+    expect(mockInvalidateCredentials).toHaveBeenCalledOnce();
+    expect(mockInvalidateCredentials).toHaveBeenCalledWith(stubConfig);
   });
 
   it("resolves (does not reject) after exhausting retries and sends error to source channel", async () => {

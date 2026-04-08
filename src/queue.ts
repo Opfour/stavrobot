@@ -3,7 +3,7 @@ import type { Agent, AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Config } from "./config.js";
 import { handlePrompt, formatUserMessage } from "./agent/index.js";
 import { AbortError } from "./errors.js";
-import { AuthError } from "./auth.js";
+import { AuthError, invalidateCredentials } from "./auth.js";
 import { isInAllowlist } from "./allowlist.js";
 import { sendSignalMessage } from "./signal.js";
 import { sendTelegramMessage } from "./telegram-api.js";
@@ -274,6 +274,12 @@ async function processQueue(): Promise<void> {
         entry.resolve("Aborted.");
       } else if (error instanceof AuthError) {
         log.error(`[stavrobot] Auth failure, not retrying: ${errorMessage}`);
+        const loginMessage = `Authentication required. Visit ${queueConfig!.publicHostname}/login to log in.`;
+        await sendErrorToSource(entry.source, entry.sender, queueConfig!, loginMessage);
+        entry.resolve(loginMessage);
+      } else if (errorMessage.includes("401 ")) {
+        log.error(`[stavrobot] Auth failure (401), not retrying: ${errorMessage}`);
+        invalidateCredentials(queueConfig!);
         const loginMessage = `Authentication required. Visit ${queueConfig!.publicHostname}/login to log in.`;
         await sendErrorToSource(entry.source, entry.sender, queueConfig!, loginMessage);
         entry.resolve(loginMessage);

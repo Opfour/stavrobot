@@ -80,6 +80,8 @@ function buildLoginPageHtml(providerName: string): string {
     #status { margin-top: 20px; color: var(--color-text-secondary); }
     #prompt-section { display: none; }
     #auth-section { display: none; }
+    ol { color: var(--color-text-secondary); margin-bottom: 16px; padding-left: 20px; }
+    li { margin-bottom: 8px; }
   </style>
 </head>
 <body>
@@ -88,15 +90,19 @@ function buildLoginPageHtml(providerName: string): string {
   <div id="auth-section">
     <p id="auth-link-container"></p>
     <p id="auth-instructions"></p>
-    <p>
-      Important: after login, you might see an error page. This is expected.
-      If that happens, copy the full URL from your browser address bar and paste it into the box below when prompted.
-    </p>
+    <ol>
+      <li>Click the link above to open the login page in a new tab.</li>
+      <li>Log in with your account.</li>
+      <li>After logging in, you may see an error page. This is normal — just copy the entire URL from your browser's address bar.</li>
+      <li>Come back to this tab and paste the URL into the box below.</li>
+    </ol>
   </div>
   <div id="prompt-section">
     <p id="prompt-message"></p>
-    <input type="text" id="prompt-input" autofocus placeholder="Paste the full redirect URL (or code) here" />
-    <button onclick="submitPrompt()">Submit</button>
+    <form onsubmit="event.preventDefault(); submitPrompt()">
+      <input type="text" id="prompt-input" autofocus placeholder="Paste the full redirect URL (or code) here" />
+      <button type="submit">Submit</button>
+    </form>
   </div>
   <script>
     const evtSource = new EventSource("/login/events");
