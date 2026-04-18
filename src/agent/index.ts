@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import pg from "pg";
 import { Type, getModel, type Model, type Api, type TextContent, type ImageContent, type AssistantMessage, type ToolCall } from "@mariozechner/pi-ai";
-import { Agent, type AgentTool, type AgentToolResult, type AgentMessage } from "@mariozechner/pi-agent-core";
+import { Agent, type AgentTool, type AgentToolResult, type AgentMessage, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Config } from "../config.js";
 import type { FileAttachment } from "../uploads.js";
 import { getApiKey } from "../auth.js";
@@ -487,7 +487,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
     initialState: {
       systemPrompt: effectiveBasePrompt,
       model,
-      thinkingLevel: "off",
+      thinkingLevel: (config.thinkingLevel ?? "low") as ThinkingLevel,
       tools: tools.map(wrapToolWithLogging),
       messages: [],
     },
