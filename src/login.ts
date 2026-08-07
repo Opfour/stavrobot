@@ -47,6 +47,7 @@ function buildLoginPageHtml(providerName: string): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Log in with ${providerName}</title>
   <style>
     ${getBaseStyles()}
@@ -55,6 +56,10 @@ function buildLoginPageHtml(providerName: string): string {
       margin: 80px auto;
       padding: 0 24px;
       line-height: 1.5;
+    }
+    @media (max-width: 480px) {
+      body { margin-top: 32px; padding: 0 16px; }
+      button { width: 100%; }
     }
     p { color: var(--color-text-secondary); margin-bottom: 16px; }
     a { color: var(--color-accent); text-decoration: none; font-weight: 500; }
