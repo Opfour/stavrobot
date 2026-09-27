@@ -425,10 +425,26 @@ export async function saveCompaction(pool: pg.Pool, summary: string, upToMessage
   if (summary.trim().length === 0) {
     throw new Error("saveCompaction: summary must not be empty or whitespace-only");
   }
-  await pool.query(
-    "INSERT INTO compactions (summary, up_to_message_id, agent_id) VALUES ($1, $2, $3)",
-    [summary, upToMessageId, agentId],
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query<{ id: number }>(
+      "INSERT INTO compactions (summary, up_to_message_id, agent_id) VALUES ($1, $2, $3) RETURNING id",
+      [summary, upToMessageId, agentId],
+    );
+    // Only the latest compaction per agent is ever read, so drop older rows for
+    // this agent in the same transaction. Rows for other agents are untouched.
+    await client.query(
+      "DELETE FROM compactions WHERE agent_id = $1 AND id <> $2",
+      [agentId, result.rows[0].id],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function loadMessages(pool: pg.Pool, agentId: number): Promise<AgentMessage[]> {

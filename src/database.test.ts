@@ -15,7 +15,7 @@ vi.mock("./toon.js", () => ({
 vi.mock("fs");
 
 import fs from "fs";
-import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, getPageMutationByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, saveMessage } from "./database.js";
+import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, getPageMutationByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, saveMessage, saveCompaction } from "./database.js";
 import type { OwnerConfig } from "./config.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
@@ -1005,5 +1005,78 @@ describe("saveMessage — returns inserted id", () => {
 
     expect(capturedValues?.[3]).toBe(42);
     expect(capturedValues?.[4]).toBeNull();
+  });
+});
+
+describe("saveCompaction — keeps only the latest row per agent", () => {
+  interface RecordedQuery {
+    text: string;
+    values?: unknown[];
+  }
+
+  function makeTransactionalPool(options: { failOnDelete?: boolean } = {}): {
+    pool: Pool;
+    queries: RecordedQuery[];
+    released: () => boolean;
+  } {
+    const queries: RecordedQuery[] = [];
+    let released = false;
+    const client = {
+      query: vi.fn().mockImplementation((text: string, values?: unknown[]) => {
+        queries.push({ text, values });
+        if (text.includes("INSERT INTO compactions")) {
+          return Promise.resolve({ rows: [{ id: 99 }], rowCount: 1 } as unknown as QueryResult);
+        }
+        if (text.includes("DELETE FROM compactions")) {
+          if (options.failOnDelete === true) {
+            return Promise.reject(new Error("delete failed"));
+          }
+          return Promise.resolve({ rows: [], rowCount: 2 } as unknown as QueryResult);
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+      }),
+      release: vi.fn().mockImplementation(() => {
+        released = true;
+      }),
+    };
+    const pool = {
+      connect: vi.fn().mockResolvedValue(client),
+    } as unknown as Pool;
+    return { pool, queries, released: () => released };
+  }
+
+  it("inserts the new row and deletes older rows for the same agent inside one transaction", async () => {
+    const { pool, queries, released } = makeTransactionalPool();
+
+    await saveCompaction(pool, "a summary", 10, 3);
+
+    const statements = queries.map((query) => query.text);
+    expect(statements[0]).toBe("BEGIN");
+    expect(statements[1]).toMatch(/INSERT INTO compactions/);
+    expect(statements[2]).toMatch(/DELETE FROM compactions/);
+    expect(statements[3]).toBe("COMMIT");
+
+    // The delete keeps the freshly inserted row and is scoped to this agent.
+    const deleteQuery = queries.find((query) => query.text.includes("DELETE FROM compactions"));
+    expect(deleteQuery?.values).toEqual([3, 99]);
+    expect(released()).toBe(true);
+  });
+
+  it("rolls back and releases the client when the delete fails", async () => {
+    const { pool, queries, released } = makeTransactionalPool({ failOnDelete: true });
+
+    await expect(saveCompaction(pool, "a summary", 10, 3)).rejects.toThrow("delete failed");
+
+    expect(queries.some((query) => query.text === "ROLLBACK")).toBe(true);
+    expect(queries.some((query) => query.text === "COMMIT")).toBe(false);
+    expect(released()).toBe(true);
+  });
+
+  it("rejects an empty summary before touching the database", async () => {
+    const { pool, queries } = makeTransactionalPool();
+
+    await expect(saveCompaction(pool, "   ", 10, 3)).rejects.toThrow(/must not be empty/);
+
+    expect(queries).toHaveLength(0);
   });
 });

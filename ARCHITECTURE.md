@@ -150,7 +150,9 @@ tries the compaction prompt; if the result is empty or not shorter than the inpu
 retries with a bullet-point prompt, and if that also fails it falls back to deterministic
 truncation capped at 10% of the effective context, keeping the newest material. The summary
 is stored in `compactions` and prepended as a synthetic user message on the next load.
-A `compactionInProgress` boolean prevents concurrent compaction runs.
+Each save inserts the new row and deletes that agent's older rows in the same transaction,
+so only the latest compaction per agent is kept. A `compactionInProgress` boolean prevents
+concurrent compaction runs.
 
 ### Context truncation
 `truncateContext()` trims the largest text blocks first (by character count) to fit
@@ -259,7 +261,7 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 |---|---|
 | `messages` | Per-agent conversation history (role, content JSONB, sender_identity_id, sender_agent_id) |
 | `memories` | Always-injected knowledge (short facts, full text in system prompt every turn) |
-| `compactions` | Summarised history snapshots (up_to_message_id boundary) |
+| `compactions` | Summarised history snapshots (up_to_message_id boundary); only the latest row per agent is retained |
 | `scratchpad` | On-demand knowledge (title injected, body fetched on read via manage_knowledge) |
 | `cron_entries` | Scheduled entries (cron expression or one-shot fire_at) |
 | `pages` | LLM-authored pages (path, mimetype, data BYTEA, is_public, queries JSONB, mutations JSONB, version INTEGER); append-only versioning — each update inserts a new row; empty `data` is a tombstone |
