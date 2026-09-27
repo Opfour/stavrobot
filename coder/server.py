@@ -22,7 +22,14 @@ SYSTEM_PROMPT_PATH = "/app/system-prompt.txt"
 PLUGINS_DIR = "/plugins/"
 TASK_TIMEOUT_SECONDS = 600
 MAX_USERNAME_LENGTH = 32
+CODER_UID = 9999
+CODER_GID = 9999
+CODER_USERNAME = "coder"
+CODER_HOME = "/home/coder"
+CODER_BIN_DIR = "/home/coder/.local/bin"
 CODER_CREDENTIALS_PATH = "/home/coder/.claude/.credentials.json"
+CLAUDE_UPDATE_INTERVAL_SECONDS = 24 * 60 * 60
+CLAUDE_UPDATE_TIMEOUT_SECONDS = 600
 PLUGIN_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 
 # Delays before each retry of post_result, in seconds. The initial attempt is
@@ -392,10 +399,57 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def run_claude_update() -> None:
+    """Run 'claude update' as the coder user to keep the CLI current.
+
+    This is the only process allowed to write under /home/coder/.local; plugin
+    users only read and execute the installed binary. The native installer
+    stages the new version and atomically renames it and the launcher symlink
+    into place, so a concurrently running claude task keeps using the version
+    it started with. Any failure is logged and swallowed: the caller retries at
+    the next interval and the server must keep serving tasks.
+    """
+    update_env = {
+        "HOME": CODER_HOME,
+        "PATH": f"{CODER_BIN_DIR}:/usr/local/bin:/usr/bin:/bin",
+        "USER": CODER_USERNAME,
+        "LOGNAME": CODER_USERNAME,
+        "SHELL": "/bin/bash",
+    }
+    try:
+        result = subprocess.run(
+            ["claude", "update"],
+            capture_output=True,
+            text=True,
+            timeout=CLAUDE_UPDATE_TIMEOUT_SECONDS,
+            user=CODER_UID,
+            group=CODER_GID,
+            env=update_env,
+        )
+        print(f"[stavrobot-coder] claude update exited with code {result.returncode}")
+        if result.stdout.strip():
+            print(f"[stavrobot-coder] claude update stdout: {result.stdout.strip()}")
+        if result.stderr.strip():
+            print(f"[stavrobot-coder] claude update stderr: {result.stderr.strip()}")
+    except subprocess.TimeoutExpired:
+        print(f"[stavrobot-coder] claude update timed out after {CLAUDE_UPDATE_TIMEOUT_SECONDS}s")
+    except Exception as error:
+        print(f"[stavrobot-coder] claude update raised an exception: {error}")
+
+
+def claude_update_loop() -> None:
+    """Update claude at startup and then every CLAUDE_UPDATE_INTERVAL_SECONDS."""
+    while True:
+        run_claude_update()
+        time.sleep(CLAUDE_UPDATE_INTERVAL_SECONDS)
+
+
 def main() -> None:
     """Start the HTTP server."""
     port = int(os.environ.get("PORT", "3002"))
     server = http.server.ThreadingHTTPServer(("", port), RequestHandler)
+    update_thread = Thread(target=claude_update_loop, daemon=True)
+    update_thread.start()
     print(f"[stavrobot-coder] Listening on port {port}")
     server.serve_forever()
 

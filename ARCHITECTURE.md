@@ -473,5 +473,9 @@ The `coder` container wraps the `claude` headless CLI binary. It:
 6. Copies refreshed credentials back and cleans up.
 7. Posts the result to `app:3000/chat` with `source: "coder"`.
 
+A background thread runs `claude update` as the coder user (uid/gid 9999) at startup
+and every 24 hours, keeping the CLI current; the native installer swaps versions
+atomically, so in-flight tasks are unaffected.
+
 The LLM process cannot read `config.toml` because the entrypoint (running as root)
 extracts only the needed values before exec-ing the server.
