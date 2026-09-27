@@ -64,7 +64,7 @@ The `manifest.json` at the root of the plugin directory describes the plugin:
 ```json
 {
   "name": "my-plugin",
-  "description": "A short description of what this plugin provides, in the imperative mood (e.g. 'Manage your Google Maps places').",
+  "description": "One short sentence on what this plugin is for (e.g. 'A plugin for your Google Maps places').",
   "summary": "Manage your Google Maps places.",
   "instructions": "Optional setup notes or usage guidance for the user.",
   "init": {
@@ -75,7 +75,7 @@ The `manifest.json` at the root of the plugin directory describes the plugin:
 ```
 
 - `name` (string, required): The plugin's unique identifier. Used to namespace tools. Must contain only lowercase letters, digits, and hyphens (`[a-z0-9-]`).
-- `description` (string, required): A short description shown when listing plugins.
+- `description` (string, required): One short sentence on what the plugin is for. It is in the assistant's context on every turn. See "Writing the description and the summary" below.
 - `summary` (string, optional): A short one-line description (roughly under 80 characters) shown in the public plugin listing on stavrobot.stavros.io. Falls back to `description` when absent.
 - `instructions` (string, optional): Setup notes or usage guidance for the user. See "Plugin instructions" below.
 - `init` (object, optional): Declares an init script.
@@ -86,7 +86,9 @@ The `manifest.json` at the root of the plugin directory describes the plugin:
 
 These two fields look similar but have different readers.
 
-`description` is read by the assistant when it decides whether a plugin can do what the user asked. Be specific about capability. Name the service, and say what the plugin can do with it. Length is not a problem here.
+`description` is in the assistant's context on every turn, next to the plugin's tool names. Its only job is to tell the assistant when to open the plugin. Keep it to one short sentence that says what the plugin is for: the service and the domain (e.g. "A plugin for the trip management app Wherewhen."). Do not put usage rules here.
+
+Put usage rules in the tool descriptions instead. The assistant reads them with `manage_plugins show` when it uses the plugin, so they cost nothing on other turns. If the assistant must do a specific action, give it a tool for that action. A tool name works better than a rule in prose.
 
 `summary` is read by a person scanning a table of every available plugin. One line, under 80 characters, no line breaks. The usual shape is a verb, an object, and the service:
 
@@ -218,7 +220,7 @@ Each tool subdirectory contains its own `manifest.json`:
 ```
 
 - `name` (string, required): The tool's name within the plugin.
-- `description` (string, required): Shown when inspecting the plugin.
+- `description` (string, required): Shown when inspecting the plugin. This is the place for usage rules and caveats.
 - `entrypoint` (string, required): The filename of the executable script inside the tool directory.
 - `async` (boolean, optional, defaults to false): If true, the tool runs asynchronously and the result is delivered via callback instead of inline.
 - `parameters` (object, required): Parameter definitions. Each key is a parameter name; each value requires string `type` and `description` fields. Any string is accepted for `type`, including `string`, `integer`, `number`, `boolean`, `file`, `array`, and `object`. Use an empty object `{}` if the tool takes no parameters. See "Receiving files" for how `file` parameters work.
