@@ -31,11 +31,11 @@ When installed, the repository is cloned into `data/plugins/my-plugin/`.
 
 If creating a new plugin:
 
-1. Make sure the plugin directory is a git repository, named `plugin-<distinctive name>`.
-2. .gitignore config.json and all usual gitignored files for the stack (e.g.
-   __pycache__, .pyc, and other such files). NEVER READ config.json, it contains secrets.
-3. Delete/do not commit PLUGIN.md
-4. When done, if everything is working and tested, commit and push to that repo.
+1. Never read config.json. It contains secrets.
+2. You may use git in the plugin directory to track your work, but do not add a
+   remote and do not push anywhere.
+3. If you use git, .gitignore config.json and the usual ignored files for the stack
+   (e.g. __pycache__, .pyc). Do not commit PLUGIN.md.
 
 
 ## README

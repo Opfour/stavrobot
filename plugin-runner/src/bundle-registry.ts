@@ -5,6 +5,9 @@ import { getPluginUserIds } from "./plugin-user.js";
 import { removeIfSymlink } from "./script-runner.js";
 
 export const PLUGINS_DIR = "/plugins";
+export const GIT_INSTALLED_DIR_NAME = ".git-installed";
+export const GIT_INSTALLED_TEMP_DIR_NAME = ".git-installed-tmp";
+export const GIT_INSTALLED_DIR = path.join(PLUGINS_DIR, GIT_INSTALLED_DIR_NAME);
 
 export interface BundleManifest {
   name: string;
@@ -171,6 +174,13 @@ export function loadBundles(): void {
   const loadedBundles: LoadedBundle[] = [];
 
   for (const bundleDirName of topLevelEntries) {
+    // Dot-prefixed entries (.git-installed, .git-installed-tmp, .tmp-install-*)
+    // are bookkeeping, not plugins; skip them so they are not reported as
+    // bundles with a missing manifest.
+    if (bundleDirName.startsWith(".")) {
+      continue;
+    }
+
     const bundleDir = path.join(PLUGINS_DIR, bundleDirName);
     const stat = fs.statSync(bundleDir);
     if (!stat.isDirectory()) {

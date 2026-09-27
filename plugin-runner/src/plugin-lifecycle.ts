@@ -5,6 +5,9 @@ import { execFileSync } from "child_process";
 
 import {
   PLUGINS_DIR,
+  GIT_INSTALLED_DIR,
+  GIT_INSTALLED_DIR_NAME,
+  GIT_INSTALLED_TEMP_DIR_NAME,
   loadBundles,
   findBundle,
   isBundleManifest,
@@ -36,8 +39,77 @@ export function isGitUrlSchemeAllowed(url: string): boolean {
   );
 }
 
-export function isEditable(pluginName: string): boolean {
-  return !fs.existsSync(path.join(PLUGINS_DIR, pluginName, ".git"));
+// A plugin is editable unless the plugin-runner installed it from git. We
+// record git installations with a marker file rather than checking for a .git
+// directory, because the coder may run git init in an editable plugin.
+function gitInstalledMarkerPath(pluginName: string, pluginsDir: string): string {
+  return path.join(pluginsDir, GIT_INSTALLED_DIR_NAME, pluginName);
+}
+
+function writeGitInstalledMarker(pluginName: string): void {
+  fs.mkdirSync(GIT_INSTALLED_DIR, { recursive: true, mode: 0o755 });
+  fs.writeFileSync(gitInstalledMarkerPath(pluginName, PLUGINS_DIR), "");
+}
+
+function removeGitInstalledMarker(pluginName: string): void {
+  fs.rmSync(gitInstalledMarkerPath(pluginName, PLUGINS_DIR), { force: true });
+}
+
+export function isEditable(pluginName: string, pluginsDir: string = PLUGINS_DIR): boolean {
+  return !fs.existsSync(gitInstalledMarkerPath(pluginName, pluginsDir));
+}
+
+// Backfill markers for plugins that were git-installed before marker files
+// existed. Markers are written into a temporary sibling directory and renamed
+// into place, so the marker directory only appears once the scan is complete
+// and a crash mid-scan cannot leave a partial result that suppresses the
+// migration on the next startup.
+export function migrateGitInstalledMarkers(pluginsDir: string = PLUGINS_DIR): void {
+  const markerDir = path.join(pluginsDir, GIT_INSTALLED_DIR_NAME);
+  const tempMarkerDir = path.join(pluginsDir, GIT_INSTALLED_TEMP_DIR_NAME);
+
+  // Remove a leftover temp directory from a previous crashed run first.
+  fs.rmSync(tempMarkerDir, { recursive: true, force: true });
+
+  if (fs.existsSync(markerDir)) {
+    return;
+  }
+
+  let topLevelEntries: string[];
+  try {
+    topLevelEntries = fs.readdirSync(pluginsDir);
+  } catch {
+    // No plugins directory yet; nothing to migrate.
+    return;
+  }
+
+  fs.mkdirSync(tempMarkerDir, { recursive: true, mode: 0o755 });
+
+  for (const entryName of topLevelEntries) {
+    // Skip bookkeeping directories created by the runner (.git-installed-tmp,
+    // .tmp-install-*). Valid plugin names never start with a dot.
+    if (entryName.startsWith(".")) {
+      continue;
+    }
+
+    const bundleDir = path.join(pluginsDir, entryName);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(bundleDir);
+    } catch {
+      continue;
+    }
+    if (!stat.isDirectory()) {
+      continue;
+    }
+
+    if (fs.existsSync(path.join(bundleDir, ".git"))) {
+      fs.writeFileSync(path.join(tempMarkerDir, entryName), "");
+      console.log(`[stavrobot-plugin-runner] Marked plugin "${entryName}" as git-installed`);
+    }
+  }
+
+  fs.renameSync(tempMarkerDir, markerDir);
 }
 
 // Ensure every existing plugin has a dedicated system user and correct
@@ -53,8 +125,9 @@ export function migrateExistingPlugins(): void {
   }
 
   for (const bundleDirName of topLevelEntries) {
-    // Skip temp directories created during install.
-    if (bundleDirName.startsWith(".tmp-install-")) {
+    // Skip bookkeeping directories created by the runner (.git-installed,
+    // .git-installed-tmp, .tmp-install-*). Valid plugin names never start with a dot.
+    if (bundleDirName.startsWith(".")) {
       continue;
     }
 
@@ -290,6 +363,10 @@ export async function handleCreate(
     return;
   }
 
+  // A plugin directory deleted by hand can leave its git-installed marker
+  // behind; a newly created editable plugin must not inherit it.
+  removeGitInstalledMarker(pluginName);
+
   fs.mkdirSync(destDir, { recursive: true });
 
   const manifest = { name: pluginName, description };
@@ -402,6 +479,9 @@ export async function handleInstall(
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 
+  // The clone is in place, so it is now a git-installed plugin.
+  writeGitInstalledMarker(pluginName);
+
   const { uid, gid } = ensurePluginUser(pluginName);
   execFileSync("chown", ["-R", "-h", `${uid}:${gid}`, destDir], { stdio: "pipe" });
   fs.chmodSync(destDir, 0o700);
@@ -416,6 +496,7 @@ export async function handleInstall(
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[stavrobot-plugin-runner] Init script failed for "${pluginName}": ${message}`);
       fs.rmSync(destDir, { recursive: true, force: true });
+      removeGitInstalledMarker(pluginName);
       removePluginUser(pluginName);
       response.writeHead(500, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ error: `Init script failed: ${message}` }));
@@ -668,6 +749,7 @@ export async function handleRemove(
 
   console.log(`[stavrobot-plugin-runner] Removing plugin "${pluginName}" from ${pluginDir}`);
   fs.rmSync(pluginDir, { recursive: true, force: true });
+  removeGitInstalledMarker(pluginName);
   fs.rmSync(`/cache/${pluginName}`, { recursive: true, force: true });
   removePluginUser(pluginName);
 

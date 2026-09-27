@@ -212,7 +212,31 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
   <tool-name>/
     manifest.json        # tool manifest (name, description, entrypoint, parameters, async?)
     <entrypoint>         # executable script (any language, run via shebang)
+
+/plugins/.git-installed/<name>   # empty marker file; presence means git-installed (non-editable)
 ```
+
+### Git-installed vs editable plugins
+- A plugin is **editable** unless `plugin-runner` installed it from git. The coder
+  edits editable plugins, so this flag determines whether `manage_plugins update` and
+  the coder may operate on a plugin.
+- Editability is recorded by a marker file at `/plugins/.git-installed/<name>` (the
+  directory is root-owned and not writable by plugin users). `isEditable(name)` is
+  simply "marker does not exist" — the old check for a `.git` directory was wrong,
+  because the coder may run `git init` in an editable plugin.
+- `install` writes the marker once the clone is moved into place and removes it again
+  if a later install step fails and the plugin directory is removed, so the marker
+  only exists while its plugin does. `remove` deletes the marker (force, since editable
+  plugins have none).
+- On startup, if `/plugins/.git-installed/` does not exist it is created and a marker
+  is written for every plugin directory that currently has a `.git` directory (one-time
+  migration for plugins installed before markers existed). Markers are staged in a
+  temporary dot-prefixed directory that is renamed into place once the scan completes,
+  so a crash cannot leave a partial marker directory behind. If the directory already
+  exists, startup does nothing, so a later `git init` does not reclassify a plugin.
+- Directory scans (`loadBundles`, `migrateExistingPlugins`) skip all dot-prefixed
+  entries (`.git-installed`, its temp directory, `.tmp-install-*`); valid plugin names
+  never start with a dot.
 
 ### Security isolation
 - Each plugin gets a dedicated system user `plug_<name>` (UID/GID created by

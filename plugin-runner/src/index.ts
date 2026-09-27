@@ -23,6 +23,7 @@ import {
   handleCreate,
   handleConfigure,
   migrateExistingPlugins,
+  migrateGitInstalledMarkers,
   isEditable,
 } from "./plugin-lifecycle.js";
 import type { TransportedFile, ScriptResult } from "./script-runner.js";
@@ -499,6 +500,7 @@ async function handleRequest(
 async function main(): Promise<void> {
   loadAppPassword();
   migrateExistingPlugins();
+  migrateGitInstalledMarkers();
   loadBundles();
 
   const server = http.createServer((request: http.IncomingMessage, response: http.ServerResponse): void => {
