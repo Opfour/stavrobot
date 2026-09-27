@@ -2,9 +2,9 @@ import { describe, it, expect, vi, type MockedFunction, beforeEach } from "vites
 import type { Agent, AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { complete } from "@earendil-works/pi-ai/compat";
 import type { Pool } from "pg";
-import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, createManageCronTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary } from "./agent/index.js";
+import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, createManageCronTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary, triggerCompactionIfNeeded, CHARS_PER_TOKEN, COMPACTION_THRESHOLD_FRACTION, LEVEL3_MAX_OUTPUT_FRACTION } from "./agent/index.js";
 import { getApiKey } from "./auth.js";
-import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage, loadAgent } from "./database.js";
+import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage, loadAgent, loadLatestCompaction, saveCompaction } from "./database.js";
 import { runSearch } from "./search.js";
 import { internalFetch } from "./internal-fetch.js";
 import { TurnProgressPersistedError } from "./errors.js";
@@ -1166,6 +1166,9 @@ describe("escalatingSummarize", () => {
     compactionBulletPrompt: "Bullet points. Target: {target} tokens maximum.",
   } as Parameters<typeof escalatingSummarize>[1];
   const fakeApiKey = "test-api-key";
+  // Compaction threshold in tokens. Large enough that the level 3 output cap
+  // (10% of effective context) does not change the existing assertions.
+  const fakeCompactionThreshold = 3000;
 
   function makeCompleteResponse(text: string): ReturnType<typeof complete> {
     return Promise.resolve({
@@ -1182,7 +1185,7 @@ describe("escalatingSummarize", () => {
     const shortSummary = "Short summary.";
     mockComplete.mockReturnValueOnce(makeCompleteResponse(shortSummary));
 
-    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey, fakeCompactionThreshold);
 
     expect(result).toBe(shortSummary);
     expect(mockComplete).toHaveBeenCalledTimes(1);
@@ -1198,7 +1201,7 @@ describe("escalatingSummarize", () => {
       .mockReturnValueOnce(makeCompleteResponse(bloatedSummary))
       .mockReturnValueOnce(makeCompleteResponse(bulletSummary));
 
-    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey, fakeCompactionThreshold);
 
     expect(result).toBe(bulletSummary);
     expect(mockComplete).toHaveBeenCalledTimes(2);
@@ -1215,7 +1218,7 @@ describe("escalatingSummarize", () => {
       .mockReturnValueOnce(makeCompleteResponse(bloated))
       .mockReturnValueOnce(makeCompleteResponse(bloated));
 
-    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey, fakeCompactionThreshold);
 
     expect(mockComplete).toHaveBeenCalledTimes(2);
     expect(result).toContain("[truncated due to compaction failure]");
@@ -1230,7 +1233,7 @@ describe("escalatingSummarize", () => {
       .mockReturnValueOnce(makeCompleteResponse(bloated))
       .mockReturnValueOnce(makeCompleteResponse(bloated));
 
-    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey, fakeCompactionThreshold);
 
     expect(result).toContain("[truncated due to compaction failure]");
     expect(result.length).toBeLessThan(input.length);
@@ -1245,11 +1248,36 @@ describe("escalatingSummarize", () => {
       .mockReturnValueOnce(makeCompleteResponse(bloated))
       .mockReturnValueOnce(makeCompleteResponse(bloated));
 
-    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey, fakeCompactionThreshold);
 
     expect(mockComplete).toHaveBeenCalledTimes(2);
     expect(result).toContain("[truncated due to compaction failure]");
     expect(result.length).toBeLessThan(input.length);
+  });
+
+  it("caps level 3 output at a fraction of the effective context and keeps the tail", async () => {
+    // compactionThreshold = 600 tokens → effective context = 1000 tokens →
+    // cap = 1000 * 0.1 = 100 tokens = 300 chars (CHARS_PER_TOKEN = 3).
+    const compactionThreshold = 600;
+    const expectedCapChars = Math.floor(
+      (compactionThreshold / COMPACTION_THRESHOLD_FRACTION) * LEVEL3_MAX_OUTPUT_FRACTION * CHARS_PER_TOKEN,
+    );
+    const marker = "[truncated due to compaction failure]\n";
+    const input = "A".repeat(4990) + "KEEPME";
+    const bloated = "B".repeat(input.length + 10);
+    mockComplete
+      .mockReturnValueOnce(makeCompleteResponse(bloated))
+      .mockReturnValueOnce(makeCompleteResponse(bloated));
+
+    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey, compactionThreshold);
+
+    // The marker is at the start because the start is what was cut.
+    expect(result.startsWith("[truncated due to compaction failure]")).toBe(true);
+    // The end of the input (the newest material) is preserved, capped at the budget.
+    expect(result.endsWith(input.slice(-expectedCapChars))).toBe(true);
+    expect(result.includes("KEEPME")).toBe(true);
+    expect(result.length).toBeLessThan(input.length);
+    expect(result.length).toBeLessThanOrEqual(expectedCapChars + marker.length);
   });
 
   it("replaces {target} placeholder in bullet prompt with computed token count", async () => {
@@ -1261,7 +1289,7 @@ describe("escalatingSummarize", () => {
       .mockReturnValueOnce(makeCompleteResponse(bloated))
       .mockReturnValueOnce(makeCompleteResponse(bulletSummary));
 
-    await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey);
+    await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey, fakeCompactionThreshold);
 
     const level2Prompt = mockComplete.mock.calls[1][1].systemPrompt as string;
     // 300 chars / 3 / 2 = 50 tokens target.
@@ -1426,6 +1454,54 @@ describe("selectCompactionCutIndex", () => {
     ];
     const result = selectCompactionCutIndex(messages, 300);
     expect(result).toBe(2);
+  });
+});
+
+describe("triggerCompactionIfNeeded — summarizer input cap", () => {
+  const mockComplete = vi.mocked(complete);
+
+  const fakeConfig = {
+    compactionPrompt: "Summarize this.",
+    compactionBulletPrompt: "Bullet points. Target: {target} tokens maximum.",
+  } as Parameters<typeof escalatingSummarize>[1];
+
+  it("truncates an oversized previous-summary message before summarization", async () => {
+    vi.clearAllMocks();
+    vi.mocked(getApiKey).mockResolvedValue("test-key");
+    vi.mocked(loadLatestCompaction).mockResolvedValue(null);
+    vi.mocked(saveCompaction).mockResolvedValue(undefined);
+    // Level 1 succeeds with a short summary; the test only inspects its input.
+    mockComplete.mockResolvedValue({
+      content: [{ type: "text", text: "short summary" }],
+    } as Awaited<ReturnType<typeof complete>>);
+
+    const pool = {
+      query: vi.fn().mockImplementation((sql: string) => {
+        if (typeof sql === "string" && sql.includes("MAX(id)")) {
+          return Promise.resolve({ rows: [{ max_id: 100 }] });
+        }
+        if (typeof sql === "string" && sql.includes("OFFSET")) {
+          return Promise.resolve({ rows: [{ id: 50 }] });
+        }
+        return Promise.resolve({ rows: [] });
+      }),
+    } as unknown as Pool;
+
+    // The huge "previous summary" user message alone is ~60000 chars
+    // (~20000 tokens), far above the 3000-token compaction threshold.
+    const messages = [userMsg(60000), userMsg(100)];
+    const agent = { state: { messages, model: {} } } as unknown as Agent;
+
+    await triggerCompactionIfNeeded(agent, pool, 1, fakeConfig, 3000);
+
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    const level1Input = mockComplete.mock.calls[0][1].messages[0].content as string;
+    expect(level1Input).toContain("[truncated]");
+    expect(level1Input.length).toBeLessThan(60000);
+    // Bounded by the compaction threshold (3000 tokens * 3 chars/token), plus a
+    // small allowance for the serializer prefix and truncation marker.
+    expect(level1Input.length).toBeLessThanOrEqual(3000 * CHARS_PER_TOKEN + 500);
+    expect(saveCompaction).toHaveBeenCalledTimes(1);
   });
 });
 

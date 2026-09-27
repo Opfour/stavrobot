@@ -76,6 +76,7 @@ export {
   TRUNCATION_BUDGET_FRACTION,
   COMPACTION_THRESHOLD_FRACTION,
   COMPACTION_KEEP_FRACTION,
+  LEVEL3_MAX_OUTPUT_FRACTION,
 } from "./compaction.js";
 export {
   filterToolsForSubagent,
@@ -647,9 +648,9 @@ async function processAttachments(attachments: FileAttachment[]): Promise<{ reso
   return { resolvedMessage, imageContents };
 }
 
-function triggerCompactionIfNeeded(agent: Agent, pool: pg.Pool, agentId: number, config: Config, compactionThreshold: number): void {
+export function triggerCompactionIfNeeded(agent: Agent, pool: pg.Pool, agentId: number, config: Config, compactionThreshold: number): Promise<void> {
   if (estimateTokens(agent.state.messages) <= compactionThreshold || compactionInProgress) {
-    return;
+    return Promise.resolve();
   }
 
   compactionInProgress = true;
@@ -659,7 +660,7 @@ function triggerCompactionIfNeeded(agent: Agent, pool: pg.Pool, agentId: number,
 
   log.debug(`[stavrobot] [debug] Compaction triggered: ${currentMessages.length} messages, ~${Math.round(estimateTokens(currentMessages))} estimated tokens`);
 
-  void (async () => {
+  return (async () => {
     try {
       const cutIndexOrNull = selectCompactionCutIndex(currentMessages, compactionThreshold);
       if (cutIndexOrNull === null) {
@@ -668,7 +669,10 @@ function triggerCompactionIfNeeded(agent: Agent, pool: pg.Pool, agentId: number,
       }
       const cutIndex = cutIndexOrNull;
 
-      const messagesToCompact = currentMessages.slice(0, cutIndex);
+      // Cap the summarizer input at the compaction threshold. This bounds the
+      // serialized transcript and also trims an oversized summary message left
+      // by a previous failed compaction, so the row self-heals on the next run.
+      const messagesToCompact = truncateContext(currentMessages.slice(0, cutIndex), compactionThreshold);
       const messagesToKeep = currentMessages.slice(cutIndex);
 
       log.debug(`[stavrobot] [debug] Cut point: index=${cutIndex}, compacting=${messagesToCompact.length}, keeping=${messagesToKeep.length}`);
@@ -691,7 +695,7 @@ function triggerCompactionIfNeeded(agent: Agent, pool: pg.Pool, agentId: number,
       const snapshotMaxId = maxIdResult.rows[0].max_id;
 
       const apiKey = await getApiKey(config);
-      const summaryText = await escalatingSummarize(serializedMessages, config, agent.state.model, apiKey);
+      const summaryText = await escalatingSummarize(serializedMessages, config, agent.state.model, apiKey, compactionThreshold);
 
       const previousCompaction = await loadLatestCompaction(pool, agentId);
       const previousBoundary = previousCompaction ? previousCompaction.upToMessageId : 0;
@@ -1029,7 +1033,7 @@ async function runHandlePrompt(
       : "";
 
     const compactionThreshold = agentCompactionThresholds.get(agent) ?? Math.floor(agent.state.model.contextWindow * COMPACTION_THRESHOLD_FRACTION);
-    triggerCompactionIfNeeded(agent, pool, agentId, config, compactionThreshold);
+    void triggerCompactionIfNeeded(agent, pool, agentId, config, compactionThreshold);
 
     return responseText;
   } catch (error) {

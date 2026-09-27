@@ -142,9 +142,14 @@ restrictions (e.g. `"manage_interlocutors.list"` allows only the `list` action).
 The main agent (id=1) always has `allowed_tools = '{*}'` and `allowed_plugins = '{*}'`.
 
 ### Context compaction
-After every turn where `messages.length > 40`, a background task (non-blocking) runs
-`complete()` with the compaction prompt to summarise the oldest messages. The summary is
-stored in `compactions` and prepended as a synthetic user message on the next load.
+After every turn whose history exceeds the compaction threshold (60% of the effective
+context budget), a background task (non-blocking) runs `escalatingSummarize()` on the
+oldest messages. The summarizer input is first truncated to the compaction threshold, so
+an oversized summary from a previous run cannot grow the compaction row. The summarizer
+tries the compaction prompt; if the result is empty or not shorter than the input it
+retries with a bullet-point prompt, and if that also fails it falls back to deterministic
+truncation capped at 10% of the effective context, keeping the newest material. The summary
+is stored in `compactions` and prepended as a synthetic user message on the next load.
 A `compactionInProgress` boolean prevents concurrent compaction runs.
 
 ### Context truncation
